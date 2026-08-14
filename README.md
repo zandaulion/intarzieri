@@ -88,6 +88,17 @@ State lives in the named volume `train-api-data` (`/data`): the VAPID keypair
 and `trips.db`. **The keypair must survive rebuilds** — regenerating it
 silently invalidates every browser subscription already issued.
 
+## The watching list
+
+Each watched trip expands in place to show the train's whole route with the
+chosen leg highlighted, the same rendering used when picking stations
+(`stopRows()` serves both, interactive or not). Stops whose expected time has
+passed are dimmed, so how far the train has got is readable at a glance.
+
+Expanding is a local DOM toggle, not a refetch, and the panel repaints from
+the cached route before revalidating -- otherwise the 60s refresh would blank
+an open panel back to a loading message.
+
 ## Deploying
 
 ```sh

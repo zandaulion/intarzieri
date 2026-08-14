@@ -112,3 +112,22 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
   background:var(--surface);border:1px solid var(--border);color:var(--muted)}
 .chip.on{background:color-mix(in srgb,var(--accent) 15%,transparent);border-color:var(--accent);color:var(--accent)}
 .note{margin:0 0 8px;font-size:.82rem;color:var(--muted);font-style:italic}
+
+/* --- expandable trip card ---------------------------------------------- */
+.trip{background:var(--surface);border:1px solid var(--border);border-radius:11px;overflow:hidden}
+.trip .row{background:none;border:0;border-radius:0;cursor:pointer}
+.trip .row:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.trip .row.open{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+.trip .row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.chev{color:var(--muted);font-size:.8rem;flex:none}
+.detail{padding:2px 13px 13px;border-top:1px solid var(--border)}
+.detail[hidden]{display:none}
+.detail .stops{margin-top:8px}
+.detail .note{margin:10px 0 0}
+.detail .hint{margin:6px 0 0}
+
+/* Non-interactive stop list (inside a trip card). */
+.detail .stop{cursor:default}
+.detail .stop:hover{background:none}
+.stop.is-past{opacity:.45}
+.stop.is-past.is-from,.stop.is-past.is-to{opacity:1}
