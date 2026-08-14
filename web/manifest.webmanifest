@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Train Watch — Romanian train delays",
-  "short_name": "Train Watch",
-  "description": "Watch a train between two stations and get notified when it departs, when its delay changes, and when it arrives.",
+  "name": "Întârzieri — trenuri CFR",
+  "short_name": "Întârzieri",
+  "description": "Urmărește un tren între două stații și primești notificare la plecare, la schimbarea întârzierii și la sosire.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

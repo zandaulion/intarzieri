@@ -1,4 +1,4 @@
-/* Train Watch admin. Served only on the tailnet listener, which is what
+/* Întârzieri admin. Served only on the tailnet listener, which is what
    injects X-Admin on the way to the API -- this page carries no credential
    of its own and would get 404s from the public URL. */
 'use strict';

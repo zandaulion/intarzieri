@@ -1,4 +1,4 @@
-/* Train Watch -- pick a train, pick a leg, get push notifications. */
+/* Întârzieri -- pick a train, pick a leg, get push notifications. */
 'use strict';
 
 const $ = (id) => document.getElementById(id);

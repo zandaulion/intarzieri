@@ -1,4 +1,4 @@
-# Train Watch
+# Întârzieri
 
 Watch one Romanian train between two stations and get a push notification when
 it departs, when its delay changes, and when it arrives.
