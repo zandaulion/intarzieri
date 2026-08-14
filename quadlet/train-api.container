@@ -15,9 +15,10 @@ Environment=POLL_SECONDS=120
 Environment=WATCH_SECONDS=180
 # Minimum change in minutes before a delay is worth a notification.
 Environment=DELAY_THRESHOLD=5
-Environment=VAPID_SUBJECT=mailto:you@example.com
-# Used to render invite links; the code alone still works by hand.
-Environment=PUBLIC_BASE_URL=https://trains.example.com
+Environment=VAPID_SUBJECT=@VAPID_SUBJECT@
+# Substituted from site.env at deploy time, so the repo carries no
+# site-specific values. See site.env.example.
+Environment=PUBLIC_BASE_URL=@PUBLIC_BASE_URL@
 Environment=INVITE_TTL_DAYS=7
 # Grace period after an invite's first use during which it re-binds the same
 # device instead of being spent. Covers "tapped it in WhatsApp, then installed

@@ -5,7 +5,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-API="${API:-http://<tailnet-address>}"
+
+# Where the tailnet-only admin surface lives. Kept in site.env rather than
+# here, so the repository carries no address of the machine it runs on.
+[[ -f "$ROOT/site.env" ]] && { set -a; . "$ROOT/site.env"; set +a; }
+API="${API:-${ADMIN_API:-}}"
+: "${API:?set ADMIN_API in site.env (see site.env.example)}"
 j() { python3 -m json.tool 2>/dev/null || cat; }
 get() { curl -fsS --max-time 15 "$API$1"; }
 post() { curl -fsS --max-time 15 -X POST "$API$1" \

@@ -5,6 +5,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Site-specific values live outside the repo. See site.env.example.
+if [[ -f "$ROOT/site.env" ]]; then
+  set -a; . "$ROOT/site.env"; set +a
+else
+  echo "site.env missing -- copy site.env.example and fill it in" >&2
+  exit 1
+fi
 DEST="${DEST:-/var/www/trains}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
@@ -30,7 +38,10 @@ echo "admin deployed -> ${ADMIN_DEST}"
 
 if [[ "${1:-}" == "--api" ]]; then
   podman build -t localhost/train-api:latest -f "$ROOT/backend/Containerfile" "$ROOT/backend"
-  cp "$ROOT/quadlet/train-api.container" "$HOME/.config/containers/systemd/"
+  sed -e "s|@PUBLIC_BASE_URL@|${PUBLIC_BASE_URL}|g" \
+      -e "s|@VAPID_SUBJECT@|${VAPID_SUBJECT}|g" \
+      "$ROOT/quadlet/train-api.container" \
+      > "$HOME/.config/containers/systemd/train-api.container"
   systemctl --user daemon-reload
   systemctl --user restart train-api.service
   echo "api rebuilt and restarted"

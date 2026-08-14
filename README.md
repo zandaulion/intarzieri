@@ -3,7 +3,11 @@
 Watch one Romanian train between two stations and get a push notification when
 it departs, when its delay changes, and when it arrives.
 
-Live at `https://<public-host>` (Tailscale Funnel → Caddy → rootless podman).
+Reached over a Cloudflare Tunnel, which terminates TLS and connects outbound
+to Caddy on loopback — the host has no public IP and no inbound ports open.
+Caddy serves two separate surfaces: a public one for the app, and a
+tailnet-only one carrying the admin page. Behind it, a rootless podman
+container runs the API.
 
 ## Where the data comes from
 
@@ -128,11 +132,15 @@ in on iOS -- see below. Redemption is globally rate limited, since every
 request arrives from Caddy on loopback and per-IP limiting would be
 meaningless.
 
-The admin page is at **http://<tailnet-address>/admin/** — tailnet only, served
-from a root the public site never maps, and `/admin*` is explicitly 404 there
-so a later change to the public root cannot start leaking it. Being plain
-HTTP it is not a secure context, so `navigator.clipboard` does not exist and
-the copy buttons fall back to `execCommand`.
+The admin page lives at `/admin/` on the **tailnet-only** listener, served
+from a root the public site never maps; `/admin*` is explicitly 404 on the
+public surface so a later change to the public root cannot start leaking it.
+That listener is plain HTTP and therefore not a secure context, so
+`navigator.clipboard` does not exist there and the copy buttons fall back to
+`execCommand`.
+
+Its address is not recorded here — `./admin.sh` reads it from `site.env`,
+which is gitignored. Copy `site.env.example` to get started.
 
 Admin has **no password**: `/api/admin/*` exists only on the tailnet-only
 Caddy site, which injects `X-Admin: 1`. The public site refuses those paths

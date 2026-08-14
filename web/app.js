@@ -589,7 +589,7 @@ function setupInApp(code) {
     ? 'În Chrome: instalează aplicația din meniul ⋮, deschide-o de pe ecranul '
       + 'principal, apoi introdu codul. Poți activa de mai multe ori în prima '
       + 'oră, deci o atingere aici nu se pierde.'
-    : 'Deschide trains.example.com în Safari, adaugă pagina pe ecranul '
+    : `Deschide ${location.host} în Safari, adaugă pagina pe ecranul `
       + 'principal, deschide-o de acolo, apoi introdu codul.';
   $('copy-code').onclick = () => copyText(code || $('invite-code').value, $('copy-code'));
 }

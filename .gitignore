@@ -5,3 +5,6 @@ __pycache__/
 # Working notes, not project content
 dns-before-cloudflare.md
 trips.db.bak-*
+
+# Site-specific values (see site.env.example)
+site.env
