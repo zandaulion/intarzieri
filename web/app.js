@@ -89,7 +89,7 @@ function stopRows(stops, { from = null, to = null, interactive = false } = {}) {
     return `<${tag} class="stop${sel}${mid}${past}"${interactive ? ` data-i="${i}"` : ''}>
         <span class="stop-time">${esc(time || '--:--')}</span>
         <span class="stop-dot"></span>
-        <span class="stop-name">${esc(sp.name)}</span>
+        <span class="stop-main"><span class="stop-name">${esc(sp.name)}</span></span>
         <span class="stop-note">${note}${est ? '<em class="tag">est</em>' : ''}</span>
       </${tag}>`;
   }).join('');
