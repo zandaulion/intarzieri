@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="ro">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Întârzieri</title>
-<meta name="description" content="Watch a Romanian train between two stations and get notified when it departs, when its delay changes, and when it arrives.">
+<meta name="description" content="Urmărește un tren între două stații și primești notificare la plecare, la schimbarea întârzierii și la sosire.">
 <meta name="theme-color" content="#0284c7">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
@@ -20,44 +20,45 @@
     <img class="logo" src="/icons/icon-192.png" width="42" height="42" alt="">
     <div>
       <h1>Întârzieri</h1>
-      <p class="sub">Pick a train and a leg. Get told when it matters.</p>
+      <p class="sub">Alege un tren și o porțiune de drum. Afli când contează.</p>
     </div>
   </header>
 
   <!-- gate ---------------------------------------------------------------->
   <section id="gate" hidden>
     <div class="card">
-      <h2 id="gate-title">Invite required</h2>
+      <h2 id="gate-title">Necesită invitație</h2>
       <p class="gate-lead" id="gate-lead">
-        This app is invite-only. If someone shared a link or a code with you,
-        enter it below to register this device.
+        Aplicația este doar pe bază de invitație. Dacă ai primit un link sau
+        un cod, introdu-l mai jos ca să înregistrezi acest dispozitiv.
       </p>
       <form class="search" id="form-code">
         <input id="invite-code" autocomplete="off" autocapitalize="characters"
                spellcheck="false" placeholder="ABCD-EFGH-JKLM"
-               aria-label="Invite code" required>
-        <button class="btn" type="submit" id="btn-activate">Activate</button>
+               aria-label="Cod de invitație" required>
+        <button class="btn" type="submit" id="btn-activate">Activează</button>
       </form>
       <p class="err" id="gate-err" hidden></p>
       <div class="warn" id="gate-inapp" hidden>
-        <strong>You opened this inside WhatsApp's browser.</strong>
-        It keeps its own cookies, so an app installed later will not be signed
-        in. Continue in your real browser instead — the code comes with you.
+        <strong>Ai deschis pagina în browserul din WhatsApp.</strong>
+        Acesta are cookie-uri proprii, așa că aplicația instalată ulterior
+        nu va fi autentificată. Continuă în browserul propriu-zis — codul
+        te însoțește.
         <div class="warn-actions">
-          <a class="btn" id="open-chrome" href="#" hidden>Open in Chrome</a>
-          <button class="btn ghost" id="copy-code" type="button">Copy code</button>
+          <a class="btn" id="open-chrome" href="#" hidden>Deschide în Chrome</a>
+          <button class="btn ghost" id="copy-code" type="button">Copiază codul</button>
         </div>
         <p class="warn-note" id="inapp-note"></p>
       </div>
       <p class="hint">
-        Each invite registers one device. Another phone or laptop needs its
-        own invite.
+        Fiecare invitație înregistrează un singur dispozitiv. Alt telefon
+        sau laptop are nevoie de propria invitație.
       </p>
       <p class="hint">
-        <strong>On iPhone:</strong> add this page to your Home Screen first
-        (Share → Add to Home Screen), then open it from there and enter the
-        code. Notifications only work from the installed app, and the
-        installed app has its own separate storage.
+        <strong>Pe iPhone:</strong> adaugă întâi pagina pe ecranul principal
+        (Distribuie → Adaugă la ecranul principal), apoi deschide-o de acolo
+        și introdu codul. Notificările funcționează doar din aplicația
+        instalată, iar aceasta are stocare proprie, separată.
       </p>
     </div>
   </section>
@@ -67,54 +68,54 @@
   <!-- install prompt -------------------------------------------------------->
   <div class="install" id="install" hidden>
     <div class="install-text">
-      <strong id="install-title">Install Întârzieri</strong>
-      <span id="install-note">Add it to your home screen so notifications
-        arrive reliably and it opens like an app.</span>
+      <strong id="install-title">Instalează Întârzieri</strong>
+      <span id="install-note">Adaug-o pe ecranul principal ca notificările
+        să ajungă sigur și să se deschidă ca o aplicație.</span>
     </div>
     <div class="install-actions">
-      <button class="btn" id="btn-install" hidden>Install</button>
-      <button class="link" id="btn-install-dismiss">Not now</button>
+      <button class="btn" id="btn-install" hidden>Instalează</button>
+      <button class="link" id="btn-install-dismiss">Nu acum</button>
     </div>
   </div>
 
   <!-- step 1 -------------------------------------------------------------->
   <section class="step" id="step-train">
-    <h2><span class="stepno">1</span> Which train?</h2>
+    <h2><span class="stepno">1</span> Ce tren?</h2>
     <form class="search" id="form-train">
       <input id="number" inputmode="numeric" autocomplete="off" spellcheck="false"
-             placeholder="Train number, e.g. 1575" aria-label="Train number" required>
-      <button class="btn" type="submit">Find</button>
+             placeholder="Numărul trenului, ex. 1575" aria-label="Numărul trenului" required>
+      <button class="btn" type="submit">Caută</button>
     </form>
-    <p class="hint">Use the number printed on your ticket — 1575, 473, 8819.</p>
+    <p class="hint">Folosește numărul de pe bilet — 1575, 473, 8819.</p>
     <p class="err" id="train-err" hidden></p>
   </section>
 
   <!-- step 2 -------------------------------------------------------------->
   <section class="step" id="step-leg" hidden>
-    <h2><span class="stepno">2</span> Which part of the journey?</h2>
+    <h2><span class="stepno">2</span> Ce parte a călătoriei?</h2>
     <div class="card" id="route-card"></div>
   </section>
 
   <!-- step 3 -------------------------------------------------------------->
   <section class="step" id="step-notify" hidden>
-    <h2><span class="stepno">3</span> Get notified</h2>
+    <h2><span class="stepno">3</span> Primește notificări</h2>
     <div class="card">
       <p class="leg-summary" id="leg-summary"></p>
       <ul class="events">
-        <li>when it <strong>departs</strong> your station</li>
-        <li>when the <strong>delay changes</strong>, with the new arrival time</li>
-        <li>when it <strong>arrives</strong> at your destination</li>
+        <li>când <strong>pleacă</strong> din stația ta</li>
+        <li>când se <strong>schimbă întârzierea</strong>, cu noua oră de sosire</li>
+        <li>când <strong>ajunge</strong> la destinație</li>
       </ul>
       <div class="actions">
-        <button class="btn" id="btn-watch">Notify me</button>
-        <button class="link" id="btn-back">Change stations</button>
+        <button class="btn" id="btn-watch">Anunță-mă</button>
+        <button class="link" id="btn-back">Schimbă stațiile</button>
       </div>
       <p class="hint" id="cap-note" hidden></p>
       <p class="err" id="notify-err" hidden></p>
       <p class="hint" id="ios-hint" hidden>
-        On iPhone, notifications only work once this page is added to the Home
-        Screen: tap Share, then <strong>Add to Home Screen</strong>, and open it
-        from there.
+        Pe iPhone notificările funcționează doar după ce pagina e adăugată pe
+        ecranul principal: apasă Distribuie, apoi <strong>Adaugă la ecranul
+        principal</strong>, și deschide-o de acolo.
       </p>
     </div>
   </section>
@@ -122,8 +123,8 @@
   <!-- watching ------------------------------------------------------------>
   <section class="board" id="watching" hidden>
     <div class="board-head">
-      <h2>Watching <span class="count" id="trip-count"></span></h2>
-      <button class="link" id="btn-test">Send a test notification</button>
+      <h2>Urmărite <span class="count" id="trip-count"></span></h2>
+      <button class="link" id="btn-test">Trimite o notificare de test</button>
     </div>
     <div class="list" id="trip-list"></div>
   </section>
@@ -131,9 +132,9 @@
   </div><!-- /#app -->
 
   <p class="foot">
-    Live data from <a href="https://mersultrenurilor.infofer.ro/">Mersul trenurilor CFR</a>.
-    Delays are as reported by station staff; values marked <em>estimated</em> are
-    InfoFer's projection between reports.
+    Date live de la <a href="https://mersultrenurilor.infofer.ro/">Mersul trenurilor CFR</a>.
+    Întârzierile sunt cele raportate de personalul din stații; valorile marcate
+    <em>est.</em> sunt proiecția InfoFer între raportări.
   </p>
 </div>
 <script src="/app.js?v=__BUILD_VERSION__"></script>

@@ -114,8 +114,8 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
   box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
 .stop.is-from,.stop.is-to{background:color-mix(in srgb,var(--accent) 11%,transparent)}
 .stop.is-mid{background:color-mix(in srgb,var(--accent) 5%,transparent)}
-.stop.is-from .stop-main::after{content:"board"}
-.stop.is-to .stop-main::after{content:"get off"}
+.stop.is-from .stop-main::after{content:"urci"}
+.stop.is-to .stop-main::after{content:"cobori"}
 .stop.is-from .stop-main::after,.stop.is-to .stop-main::after{
   flex:none;font-weight:700;font-size:.72rem;letter-spacing:.03em;
   text-transform:uppercase;color:var(--accent)}

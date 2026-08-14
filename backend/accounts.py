@@ -273,10 +273,10 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
             "SELECT * FROM invites WHERE code_hash = ?", (_hash(code),)
         ).fetchone()
         if not row:
-            raise InviteError("That invite code is not valid.")
+            raise InviteError("Codul de invitație nu este valid.")
         now = datetime.now(timezone.utc)
         if datetime.fromisoformat(row["expires_at"]) < now:
-            raise InviteError("That invite has expired. Ask for a new one.")
+            raise InviteError("Invitația a expirat. Cere una nouă.")
 
         rebind_to = None
         if row["used_at"]:
@@ -286,7 +286,7 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
                 # and the earlier context is signed out by the rotation.
                 rebind_to = row["device_id"]
             else:
-                raise InviteError("That invite has already been used.")
+                raise InviteError("Invitația a fost deja folosită.")
 
         token = new_device_token()
         if rebind_to or row["adopt_id"]:

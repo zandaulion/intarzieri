@@ -15,14 +15,14 @@ const api = (path, body, method) =>
     body: body ? JSON.stringify(body) : undefined,
   }).then(async (r) => {
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new ApiError(r.status, data.detail || `Request failed (${r.status})`);
+    if (!r.ok) throw new ApiError(r.status, data.detail || `Cererea a eșuat (${r.status})`);
     return data;
   });
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString([],
+const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('ro-RO',
   { hour: '2-digit', minute: '2-digit' }) : '--:--');
 
 // A bare HH:MM is ambiguous once a trip is not from today -- overnight trains
@@ -31,7 +31,7 @@ const whenLabel = (iso) => {
   if (!iso) return '--:--';
   const d = new Date(iso);
   if (d.toDateString() === new Date().toDateString()) return hhmm(iso);
-  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${hhmm(iso)}`;
+  return `${d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })} ${hhmm(iso)}`;
 };
 
 const state = {
@@ -56,7 +56,7 @@ function updateCapUI() {
   if (note) {
     note.hidden = !full;
     note.textContent = full
-      ? `You are already watching ${state.limit} trains. Stop watching one below to add another.`
+      ? `Urmărești deja ${state.limit} trenuri. Oprește unul mai jos ca să adaugi altul.`
       : '';
   }
   const count = $('trip-count');
@@ -75,7 +75,7 @@ $('form-train').addEventListener('submit', async (e) => {
   err.hidden = true;
   const btn = e.target.querySelector('button');
   btn.disabled = true;
-  btn.textContent = 'Finding…';
+  btn.textContent = 'Se caută…';
   try {
     state.route = await api(`/api/route/${encodeURIComponent(num)}`);
     // A train can be published as several variants of the same run; start on
@@ -92,7 +92,7 @@ $('form-train').addEventListener('submit', async (e) => {
     err.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Find';
+    btn.textContent = 'Caută';
   }
 });
 
@@ -106,7 +106,7 @@ function stopRows(stops, { from = null, to = null, interactive = false } = {}) {
     const expected = sp.dep_expected || sp.arr_expected;
     let note = '';
     if (delay === null || delay === undefined) note = '';
-    else if (delay === 0) note = '<span class="s-on_time">on time</span>';
+    else if (delay === 0) note = '<span class="s-on_time">la timp</span>';
     else {
       const cls = delay < 15 ? 'slight' : delay < 60 ? 'delayed' : 'severe';
       note = `<span class="s-${cls}">${delay > 0 ? '+' : ''}${delay} min</span>
@@ -122,7 +122,7 @@ function stopRows(stops, { from = null, to = null, interactive = false } = {}) {
         <span class="stop-time">${esc(time || '--:--')}</span>
         <span class="stop-dot"></span>
         <span class="stop-main"><span class="stop-name">${esc(sp.name)}</span></span>
-        <span class="stop-note">${note}${est ? '<em class="tag">est</em>' : ''}</span>
+        <span class="stop-note">${note}${est ? '<em class="tag">est.</em>' : ''}</span>
       </${tag}>`;
   }).join('');
 }
@@ -134,10 +134,10 @@ function renderRoute() {
     { from: state.from, to: state.to, interactive: true });
 
   const hint = state.from === null
-    ? 'Tap the station you board at.'
+    ? 'Atinge stația din care urci.'
     : state.to === null
-      ? 'Now tap the station you get off at.'
-      : 'Tap any station to start over.';
+      ? 'Acum atinge stația în care cobori.'
+      : 'Atinge orice stație ca să reîncepi.';
 
   const picker = r.branches.length > 1
     ? `<div class="branches">${r.branches.map((b, i) =>
@@ -183,8 +183,8 @@ function selectStop(i) {
     const b = stops[state.to];
     $('leg-summary').innerHTML =
       `<strong>${esc(state.route.category || '')} ${esc(state.route.number)}</strong>
-       from <strong>${esc(a.name)}</strong> (${esc(a.dep_scheduled || '--:--')})
-       to <strong>${esc(b.name)}</strong> (${esc(b.arr_scheduled || '--:--')})`;
+       din <strong>${esc(a.name)}</strong> (${esc(a.dep_scheduled || '--:--')})
+       până în <strong>${esc(b.name)}</strong> (${esc(b.arr_scheduled || '--:--')})`;
     updateCapUI();
     $('step-notify').hidden = false;
     $('step-notify').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -243,15 +243,15 @@ function refreshInstallBar() {
   if (installPrompt) {
     $('btn-install').hidden = false;
     $('install-note').textContent =
-      'Add it to your home screen so notifications arrive reliably and it '
-      + 'opens like an app.';
+      'Adaug-o pe ecranul principal ca notificările să ajungă sigur și să se '
+      + 'deschidă ca o aplicație.';
     bar.hidden = false;
   } else if (isIOS()) {
     $('btn-install').hidden = true;
-    $('install-title').textContent = 'Add to Home Screen';
+    $('install-title').textContent = 'Adaugă pe ecranul principal';
     $('install-note').textContent =
-      'Tap the Share button below, then "Add to Home Screen". On iPhone '
-      + 'notifications only work from the installed app.';
+      'Apasă butonul Distribuie, apoi „Adaugă la ecranul principal”. Pe '
+      + 'iPhone notificările funcționează doar din aplicația instalată.';
     bar.hidden = false;
   } else {
     bar.hidden = true;
@@ -273,14 +273,14 @@ window.addEventListener('appinstalled', () => {
 async function getSubscription() {
   if (state.sub) return state.sub;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    throw new Error('This browser does not support push notifications.');
+    throw new Error('Acest browser nu acceptă notificări push.');
   }
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') {
-      throw new Error('Notifications are blocked. Allow them for this site and try again.');
+      throw new Error('Notificările sunt blocate. Permite-le pentru acest site și încearcă din nou.');
     }
     const { publicKey } = await api('/api/vapid');
     sub = await reg.pushManager.subscribe({
@@ -298,7 +298,7 @@ $('btn-watch').addEventListener('click', async () => {
   err.hidden = true;
   const btn = $('btn-watch');
   btn.disabled = true;
-  btn.textContent = 'Setting up…';
+  btn.textContent = 'Se configurează…';
   try {
     const sub = await getSubscription();
     const stops = state.route.branches[state.branch].stops;
@@ -315,7 +315,7 @@ $('btn-watch').addEventListener('click', async () => {
     // The new card in the watching list is the confirmation, so the picker
     // clears itself rather than leaving a spent form behind.
     resetPicker();
-    btn.textContent = 'Notify me';
+    btn.textContent = 'Anunță-mă';
     updateCapUI();
     $('watching').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (ex) {
@@ -325,7 +325,7 @@ $('btn-watch').addEventListener('click', async () => {
     if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !standalone()) {
       $('ios-hint').hidden = false;
     }
-    btn.textContent = 'Notify me';
+    btn.textContent = 'Anunță-mă';
     btn.disabled = false;
     // The server is the authority on the limit; a rejection means our count
     // was stale, so resync rather than trusting it.
@@ -355,7 +355,7 @@ $('btn-test').addEventListener('click', async () => {
   try {
     const sub = await getSubscription();
     const res = await api('/api/push/test', { subscription: sub });
-    if (!res.delivered) throw new Error(`Push service refused it (${res.status}).`);
+    if (!res.delivered) throw new Error(`Serviciul de notificări a refuzat (${res.status}).`);
   } catch (ex) {
     alert(ex.message);
   }
@@ -389,16 +389,16 @@ async function refreshTrips() {
   // reachable even before anything is being watched.
   $('watching').hidden = false;
   $('trip-list').innerHTML = trips.length === 0
-    ? '<p class="hint">Nothing yet. Pick a train above.</p>'
+    ? '<p class="hint">Nimic încă. Alege un tren mai sus.</p>'
     : trips.map((t) => {
         // active=0 with arrived=0 means the 6h fallback retired it: the train
         // stopped being published before an arrival was ever seen.
-        const status = t.arrived ? 'arrived'
-          : !t.active ? 'no longer tracked'
-          : t.departed ? 'en route' : 'not yet departed';
+        const status = t.arrived ? 'a sosit'
+          : !t.active ? 'nu mai e urmărit'
+          : t.departed ? 'în cursă' : 'încă nu a plecat';
         const d = t.last_delay;
         const delay = (d === null || d === undefined)
-          ? '' : (d === 0 ? 'on time' : `${d > 0 ? '+' : ''}${d} min`);
+          ? '' : (d === 0 ? 'la timp' : `${d > 0 ? '+' : ''}${d} min`);
         // Show when it is actually expected, not the timetable time.
         const eta = t.arr_planned
           ? new Date(new Date(t.arr_planned).getTime() + (d || 0) * 60000).toISOString()
@@ -407,13 +407,13 @@ async function refreshTrips() {
         return `<div class="trip">
             <div class="row${t.active ? '' : ' done'}${open ? ' open' : ''}"
                  data-trip="${t.id}" role="button" tabindex="0"
-                 aria-expanded="${open}" title="Show this train's stations">
+                 aria-expanded="${open}" title="Arată stațiile trenului">
               <span class="rn">${esc(t.number)}</span>
               <span class="rs">${esc(t.from_name)} → ${esc(t.to_name)}<br>
                 <em>${esc(status)}${esc(delay ? ' · ' + delay : '')}</em></span>
               <span class="rd">${esc(whenLabel(eta))}</span>
               <span class="chev" aria-hidden="true">${open ? '▴' : '▾'}</span>
-              <button class="link del" data-id="${t.id}" aria-label="Stop watching">✕</button>
+              <button class="link del" data-id="${t.id}" aria-label="Nu mai urmări">✕</button>
             </div>
             <div class="detail" id="detail-${t.id}"${open ? '' : ' hidden'}></div>
           </div>`;
@@ -468,19 +468,19 @@ function applyOpenState(trips) {
 // route.py parses the place and the verb out; this turns them back into a
 // sentence, in English like the rest of the UI.
 const MEASURED = {
-  arrival: (p) => `arriving in ${p}`,
-  departure: (p) => `leaving ${p}`,
-  passing: (p) => `passing ${p}`,
-  destination: (p) => `arriving at its destination, ${p}`,
+  arrival: (p) => `la sosirea în ${p}`,
+  departure: (p) => `la plecarea din ${p}`,
+  passing: (p) => `la trecerea prin ${p}`,
+  destination: (p) => `la sosirea la destinație, ${p}`,
 };
 
 function summaryLine(br) {
   const d = br.summary_delay;
   if (d === null || d === undefined) return '';
-  const head = d > 0 ? `Reported ${d} min late`
-    : d < 0 ? `Reported ${-d} min early`
-    : 'Reported on time';
-  const when = br.reported_at ? ` at ${br.reported_at}` : '';
+  const head = d > 0 ? `Raportat ${d} min întârziere`
+    : d < 0 ? `Raportat ${-d} min mai devreme`
+    : 'Raportat la timp';
+  const when = br.reported_at ? ` la ${br.reported_at}` : '';
   const where = br.measured_at && MEASURED[br.measured_kind]
     ? `, ${MEASURED[br.measured_kind](br.measured_at)}` : '';
   return esc(`${head}${when}${where}`);
@@ -488,7 +488,7 @@ function summaryLine(br) {
 
 function positionLine(br) {
   if (br.between && br.between.length === 2) {
-    return esc(`Between ${br.between[0]} and ${br.between[1]}`);
+    return esc(`Între stațiile ${br.between[0]} și ${br.between[1]}`);
   }
   return br.position_note ? esc(br.position_note) : '';
 }
@@ -521,7 +521,7 @@ async function showTripDetail(trip) {
   // panel back to a loading message.
   const cached = state.routes.get(key);
   if (cached) renderDetail(host, trip, cached);
-  else host.innerHTML = '<p class="hint">Loading stations…</p>';
+  else host.innerHTML = '<p class="hint">Se încarcă stațiile…</p>';
 
   let route;
   try {
@@ -565,7 +565,7 @@ async function copyText(text, btn) {
   }
   if (btn) {
     const was = btn.textContent;
-    btn.textContent = ok ? 'Copied' : 'Select it manually';
+    btn.textContent = ok ? 'Copiat' : 'Selectează manual';
     setTimeout(() => { btn.textContent = was; }, 1800);
   }
 }
@@ -586,11 +586,11 @@ function setupInApp(code) {
     chrome.hidden = false;
   }
   $('inapp-note').textContent = isAndroid()
-    ? 'In Chrome: install the app from the ⋮ menu, open it from your home '
-      + 'screen, then enter the code. You can activate more than once in the '
-      + 'first hour, so a tap here is not wasted.'
-    : 'Open trains.example.com in Safari, add it to your Home Screen, '
-      + 'open it from there, then enter the code.';
+    ? 'În Chrome: instalează aplicația din meniul ⋮, deschide-o de pe ecranul '
+      + 'principal, apoi introdu codul. Poți activa de mai multe ori în prima '
+      + 'oră, deci o atingere aici nu se pierde.'
+    : 'Deschide trains.example.com în Safari, adaugă pagina pe ecranul '
+      + 'principal, deschide-o de acolo, apoi introdu codul.';
   $('copy-code').onclick = () => copyText(code || $('invite-code').value, $('copy-code'));
 }
 
@@ -600,13 +600,12 @@ function showGate(prefill) {
   setupInApp(prefill);
   if (prefill) {
     $('invite-code').value = prefill;
-    $('gate-title').textContent = 'Activate this device';
+    $('gate-title').textContent = 'Activează acest dispozitiv';
     $('gate-lead').textContent =
-      'This invite registers the device you are reading this on. It can only '
-      + 'be used once.';
+      'Această invitație înregistrează dispozitivul pe care o citești acum.';
     // Deliberately not auto-submitted: a link preview fetch must never be
     // able to spend the invite, so redemption needs a real tap.
-    $('btn-activate').textContent = 'Activate this device';
+    $('btn-activate').textContent = 'Activează acest dispozitiv';
   }
 }
 
@@ -623,7 +622,7 @@ $('form-code').addEventListener('submit', async (e) => {
   const btn = $('btn-activate');
   const label = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Activating…';
+  btn.textContent = 'Se activează…';
   try {
     await api('/api/invites/redeem', { code: $('invite-code').value });
     history.replaceState({}, '', '/');

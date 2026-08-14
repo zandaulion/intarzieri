@@ -217,7 +217,7 @@ async def current_device(request: Request) -> dict:
     device = await accounts.device_by_token(token) if token else None
     if not device:
         raise HTTPException(
-            401, "This device is not registered. You need an invite link to use this app."
+            401, "Acest dispozitiv nu este înregistrat. Ai nevoie de o invitație."
         )
     return device
 
@@ -309,8 +309,8 @@ async def train(number: str, device: dict = Depends(current_device)):
     if not t:
         raise HTTPException(
             status_code=404,
-            detail=f"Train {number} is not currently on the live map. "
-                   "Only trains running right now appear here.",
+            detail=f"Trenul {number} nu apare acum pe harta live. "
+                   "Aici apar doar trenurile aflate în circulație.",
         )
     return {"meta": _meta(), "train": shape(t)}
 
@@ -328,14 +328,20 @@ async def train_route(
     try:
         day = date.fromisoformat(when) if when else datetime.now(R.RO).date()
     except ValueError:
-        raise HTTPException(400, "date must be YYYY-MM-DD")
+        raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
 
     try:
         rt = await routes.get(client(), number, day)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        log.info("route %s/%s unavailable: %s", number, day, exc)
+        raise HTTPException(
+            404,
+            "Nu am găsit traseul acestui tren. "
+            "Verifică numărul sau poate nu circulă în ziua aleasă.",
+        )
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"upstream unavailable: {exc}")
+        log.warning("upstream error for %s: %s", number, exc)
+        raise HTTPException(502, "Sursa de date nu răspunde. Încearcă din nou.")
 
     start = R.parse_ro_date(rt.date)
 
@@ -382,15 +388,15 @@ async def create_trip(
 ):
     sub = payload.get("subscription") or {}
     if sub and (not sub.get("endpoint") or not (sub.get("keys") or {}).get("auth")):
-        raise HTTPException(400, "that push subscription is incomplete")
+        raise HTTPException(400, "Abonarea la notificări este incompletă.")
 
     number = str(payload.get("number") or "").strip()
     from_slug = payload.get("from_slug")
     to_slug = payload.get("to_slug")
     if not number or not from_slug or not to_slug:
-        raise HTTPException(400, "number, from_slug and to_slug are required")
+        raise HTTPException(400, "Lipsesc trenul sau stațiile.")
     if from_slug == to_slug:
-        raise HTTPException(400, "departure and arrival must differ")
+        raise HTTPException(400, "Stația de plecare și cea de sosire trebuie să difere.")
 
     try:
         day = (
@@ -399,14 +405,20 @@ async def create_trip(
             else datetime.now(R.RO).date()
         )
     except (ValueError, TypeError):
-        raise HTTPException(400, "run_date must be YYYY-MM-DD")
+        raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
 
     try:
         rt = await routes.get(client(), number, day)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        log.info("route %s/%s unavailable: %s", number, day, exc)
+        raise HTTPException(
+            404,
+            "Nu am găsit traseul acestui tren. "
+            "Verifică numărul sau poate nu circulă în ziua aleasă.",
+        )
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"upstream unavailable: {exc}")
+        log.warning("upstream error for %s: %s", number, exc)
+        raise HTTPException(502, "Sursa de date nu răspunde. Încearcă din nou.")
 
     branch = rt.branch_for(from_slug, to_slug)
     if branch is None:
@@ -415,9 +427,9 @@ async def create_trip(
         )
         raise HTTPException(
             400,
-            "the arrival station comes before the departure one"
+            "Stația de sosire este înaintea celei de plecare."
             if on_any
-            else "those stations are not on this train's route",
+            else "Stațiile alese nu sunt pe traseul acestui tren.",
         )
 
     index = {st.slug: i for i, st in enumerate(branch.stops)}
@@ -446,8 +458,8 @@ async def create_trip(
     except trips.TripLimitReached as exc:
         raise HTTPException(
             409,
-            f"You can watch {exc.limit} trains at once. "
-            "Stop watching one before adding another.",
+            f"Poți urmări {exc.limit} trenuri simultan. "
+            "Oprește unul înainte de a adăuga altul.",
         )
 
     await trips.prime(trip_id, rt)
@@ -476,7 +488,7 @@ async def list_trips(device: dict = Depends(current_device)):
 @app.delete("/api/trips/{trip_id}")
 async def remove_trip(trip_id: int, device: dict = Depends(current_device)):
     if not await trips.delete_trip(trip_id, device["id"]):
-        raise HTTPException(404, "no such trip on this device")
+        raise HTTPException(404, "Nu există această cursă pe acest dispozitiv.")
     return {"deleted": trip_id}
 
 
@@ -496,7 +508,7 @@ async def push_subscribe(
     rotated endpoint updates the device's row rather than orphaning it."""
     sub = payload.get("subscription") or {}
     if not sub.get("endpoint") or not (sub.get("keys") or {}).get("auth"):
-        raise HTTPException(400, "a complete push subscription is required")
+        raise HTTPException(400, "Abonarea la notificări este incompletă.")
     await trips.save_subscription(device["id"], sub)
     return {"ok": True}
 
@@ -511,9 +523,9 @@ async def push_test(
     ok, status = await push.send(
         sub,
         {
-            "title": "Notifications are working",
-            "body": "You will get one of these when your train departs, "
-                    "when its delay changes, and when it arrives.",
+            "title": "Notificările funcționează",
+            "body": "Vei primi câte una când trenul pleacă, când se schimbă "
+                    "întârzierea și când ajunge.",
             "tag": "test",
             "kind": "test",
         },
@@ -534,11 +546,11 @@ async def redeem_invite(response: Response, payload: dict = Body(...)):
     bots do not POST.
     """
     if accounts.throttled():
-        raise HTTPException(429, "Too many attempts. Wait a minute and try again.")
+        raise HTTPException(429, "Prea multe încercări. Așteaptă un minut.")
 
     code = accounts.normalise_code(payload.get("code") or "")
     if not code:
-        raise HTTPException(400, "That does not look like an invite code.")
+        raise HTTPException(400, "Nu pare a fi un cod de invitație.")
 
     try:
         device_id, token = await accounts.redeem(code)

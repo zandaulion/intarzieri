@@ -389,12 +389,12 @@ def evaluate(trip: dict, rt: R.Route, now: datetime) -> tuple[list[dict], dict]:
     # 1. departure
     if not trip["departed"] and dep_dt and now >= dep_dt:
         dep_delay = from_stop.dep_delay or 0
-        late = f"{dep_delay:+d} min" if dep_delay else "on time"
+        late = f"{dep_delay:+d} min" if dep_delay else "la timp"
         events.append({
             "kind": "departed",
-            "title": f"{label} departed {trip['from_name']}",
-            "body": f"Left at {_fmt(dep_dt)} ({late}). "
-                    f"Expected in {trip['to_name']} at {_fmt(arr_dt)}.",
+            "title": f"{label} a plecat din {trip['from_name']}",
+            "body": f"A plecat la {_fmt(dep_dt)} ({late}). "
+                    f"Sosire estimată în {trip['to_name']} la {_fmt(arr_dt)}.",
             "tag": f"trip-{trip['id']}-departed",
         })
         updates["departed"] = 1
@@ -407,12 +407,13 @@ def evaluate(trip: dict, rt: R.Route, now: datetime) -> tuple[list[dict], dict]:
         if known is None:
             updates["last_delay"] = arr_delay
         elif abs(arr_delay - known) >= DELAY_THRESHOLD:
-            direction = "increased" if arr_delay > known else "recovered"
+            direction = "a crescut" if arr_delay > known else "a scăzut"
             events.append({
                 "kind": "delay",
-                "title": f"{label}: delay {direction} to {arr_delay} min",
-                "body": f"Now expected in {trip['to_name']} at {_fmt(arr_dt)} "
-                        f"(was {known:+d} min, now {arr_delay:+d} min).",
+                "title": f"{label}: întârzierea {direction} la {arr_delay} min",
+                "body": f"Sosire estimată acum în {trip['to_name']} la "
+                        f"{_fmt(arr_dt)} (era {known:+d} min, acum "
+                        f"{arr_delay:+d} min).",
                 "tag": f"trip-{trip['id']}-delay",
             })
             updates["last_delay"] = arr_delay
@@ -420,11 +421,11 @@ def evaluate(trip: dict, rt: R.Route, now: datetime) -> tuple[list[dict], dict]:
     # 3. arrival
     if not trip["arrived"] and arr_dt and now >= arr_dt:
         d = arr_delay or 0
-        late = f"{d} min late" if d > 0 else "on time"
+        late = f"{d} min întârziere" if d > 0 else "la timp"
         events.append({
             "kind": "arrived",
-            "title": f"{label} arrived in {trip['to_name']}",
-            "body": f"Arrived at {_fmt(arr_dt)} ({late}).",
+            "title": f"{label} a sosit în {trip['to_name']}",
+            "body": f"A sosit la {_fmt(arr_dt)} ({late}).",
             "tag": f"trip-{trip['id']}-arrived",
         })
         updates["arrived"] = 1
