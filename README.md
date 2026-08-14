@@ -117,7 +117,12 @@ invite before the recipient ever saw it. Preview bots do not POST. Verified:
 fetching `/i/<code>` leaves `used_at` null.
 
 Codes are 12 characters from an alphabet with no `I`/`1`/`O`/`0` (~60 bits),
-stored hashed, single use, expiring after `INVITE_TTL_DAYS`. They are
+expiring after `INVITE_TTL_DAYS`. `code_hash` is the authority for redemption;
+the plaintext is kept alongside it **only while the invite can still register
+something**, so it can be re-shown or copied, and is wiped on redemption. A
+spent invite therefore shows no code -- issue a new one rather than trying to
+recover it. `./admin.sh prune` (or the button on the admin page) deletes every
+used and expired invite; pending ones are never touched. They are
 accepted lower-case and without dashes, because the code doubles as the way
 in on iOS -- see below. Redemption is globally rate limited, since every
 request arrives from Caddy on loopback and per-IP limiting would be
@@ -181,6 +186,8 @@ an open panel back to a loading message.
 ./deploy.sh          # web assets only
 ./deploy.sh --api    # also rebuild the image and restart the unit
 ./admin.sh invite X  # mint an invite (tailnet only)
+./admin.sh invites   # list, with codes for the ones still usable
+./admin.sh prune     # delete used and expired invites
 ./admin.sh devices   # who is registered, and what they are watching
 ./admin.sh revoke N  # lock a device out immediately
 ```

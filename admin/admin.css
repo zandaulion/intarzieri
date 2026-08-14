@@ -59,3 +59,8 @@ input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:tran
   overflow-x:auto;white-space:nowrap;min-width:0}
 .code-big{font-size:1.15rem;letter-spacing:.12em;font-weight:700}
 .note{color:var(--muted);font-size:.8rem;margin:10px 0 0;line-height:1.5}
+
+.code-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.code-row code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;
+  letter-spacing:.08em;font-weight:700;background:var(--bg);border:1px solid var(--border);
+  border-radius:7px;padding:5px 9px}

@@ -175,6 +175,9 @@ function renderInvites(invites) {
     const state = i.used_at ? ['ok', `used ${when(i.used_at)}`]
       : expired ? ['bad', 'expired']
       : ['warn', `expires ${when(i.expires_at).replace(' ago', ' from now')}`];
+    // The code exists only while the invite can still register something;
+    // it is wiped from the database on redemption.
+    const live = i.code && !i.used_at && !expired;
     return `
       <div class="item${i.used_at || expired ? ' off' : ''}">
         <div class="grow">
@@ -186,18 +189,32 @@ function renderInvites(invites) {
             #${i.id} · created ${esc(when(i.created_at))}
             ${i.device_id ? ` · became device #${i.device_id}` : ''}
           </div>
+          ${live ? `<div class="code-row">
+              <code>${esc(i.code)}</code>
+              <button class="btn small ghost" data-copy="${esc(i.code)}">Code</button>
+              ${i.url ? `<button class="btn small ghost" data-copy="${esc(i.url)}">Link</button>` : ''}
+            </div>` : ''}
         </div>
         ${i.used_at ? '' :
           `<button class="btn small ghost" data-unvite="${i.id}">Revoke</button>`}
       </div>`;
   };
   $('invites').innerHTML = [...open, ...used].map(row).join('');
+  $('invites').querySelectorAll('[data-copy]').forEach((b) =>
+    b.addEventListener('click', () => copy(b.dataset.copy, b)));
   $('invites').querySelectorAll('[data-unvite]').forEach((b) =>
     b.addEventListener('click', async () => {
       await api(`/api/admin/invites/${b.dataset.unvite}/revoke`, {});
       load();
     }));
 }
+
+$('prune').addEventListener('click', async () => {
+  if (!confirm('Delete every used and expired invite? Pending ones are kept.')) return;
+  const r = await api('/api/admin/invites/prune', {});
+  await load();
+  alert(`Removed ${r.deleted} invite${r.deleted === 1 ? '' : 's'}.`);
+});
 
 $('refresh').addEventListener('click', load);
 load();

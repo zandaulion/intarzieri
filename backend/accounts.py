@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS invites (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     used_at    TEXT,
+    -- The code in the clear, kept ONLY while the invite is still usable so it
+    -- can be re-shown or re-copied. Wiped on redemption, so the table never
+    -- holds a plaintext credential that still works. code_hash stays the
+    -- authority for redemption.
+    code_plain TEXT,
     device_id  INTEGER REFERENCES devices(id) ON DELETE SET NULL,
     -- When set before redemption, the invite binds an existing device rather
     -- than creating one. Used to hand an already-registered device back to
@@ -68,6 +73,10 @@ CREATE TABLE IF NOT EXISTS invites (
 
 def init_schema(con) -> None:
     con.executescript(SCHEMA)
+    have = {r["name"] for r in con.execute("PRAGMA table_info(invites)")}
+    if "code_plain" not in have:
+        con.execute("ALTER TABLE invites ADD COLUMN code_plain TEXT")
+        log.info("migrated invites: added code_plain")
 
 
 # --------------------------------------------------------------------------
@@ -190,10 +199,12 @@ def _create_invite_blocking(label: str | None, adopt_id: int | None) -> str:
     code = new_invite_code()
     with connect() as con:
         con.execute(
-            """INSERT INTO invites (code_hash, label, created_at, expires_at, adopt_id)
-               VALUES (?,?,?,?,?)""",
+            """INSERT INTO invites (code_hash, code_plain, label, created_at,
+                                    expires_at, adopt_id)
+               VALUES (?,?,?,?,?,?)""",
             (
                 _hash(code),
+                code,
                 label,
                 _now(),
                 (datetime.now(timezone.utc) + INVITE_TTL).isoformat(timespec="seconds"),
@@ -212,7 +223,8 @@ def _list_invites_blocking() -> list[dict]:
         return [
             dict(r)
             for r in con.execute(
-                """SELECT id, label, created_at, expires_at, used_at, device_id, adopt_id
+                """SELECT id, label, created_at, expires_at, used_at, device_id,
+                          adopt_id, code_plain
                      FROM invites ORDER BY id DESC"""
             )
         ]
@@ -232,6 +244,21 @@ def _revoke_invite_blocking(invite_id: int) -> bool:
 
 async def revoke_invite(invite_id: int) -> bool:
     return await asyncio.to_thread(_revoke_invite_blocking, invite_id)
+
+
+def _prune_invites_blocking() -> int:
+    """Drop invites that can no longer register anything: already used, or
+    expired unused. Pending ones are never touched."""
+    now = _now()
+    with connect() as con:
+        cur = con.execute(
+            "DELETE FROM invites WHERE used_at IS NOT NULL OR expires_at < ?", (now,)
+        )
+        return cur.rowcount
+
+
+async def prune_invites() -> int:
+    return await asyncio.to_thread(_prune_invites_blocking)
 
 
 class InviteError(Exception):
@@ -275,10 +302,12 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
             )
             device_id = cur.lastrowid
 
-        # Keep the original used_at so the grace window stays absolute.
+        # Keep the original used_at so the grace window stays absolute. The
+        # plaintext is dropped at the same time -- after this the code can only
+        # re-bind an existing device, and not at all once the window closes.
         con.execute(
-            "UPDATE invites SET used_at = COALESCE(used_at, ?), device_id = ? "
-            "WHERE id = ?",
+            "UPDATE invites SET used_at = COALESCE(used_at, ?), device_id = ?, "
+            "code_plain = NULL WHERE id = ?",
             (_now(), device_id, row["id"]),
         )
         return device_id, token

@@ -581,7 +581,22 @@ async def admin_label_device(device_id: int, payload: dict = Body(...)):
 
 @app.get("/api/admin/invites", dependencies=[Depends(admin_only)])
 async def admin_invites():
-    return {"invites": await accounts.list_invites(), "ttl_days": accounts.INVITE_TTL.days}
+    base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    invites = await accounts.list_invites()
+    for i in invites:
+        code = i.pop("code_plain", None)
+        i["code"] = code
+        i["url"] = f"{base}/i/{code}" if code and base else None
+    return {
+        "invites": invites,
+        "ttl_days": accounts.INVITE_TTL.days,
+        "rebind_minutes": int(accounts.INVITE_REBIND.total_seconds() // 60),
+    }
+
+
+@app.post("/api/admin/invites/prune", dependencies=[Depends(admin_only)])
+async def admin_prune_invites():
+    return {"deleted": await accounts.prune_invites()}
 
 
 @app.post("/api/admin/invites", dependencies=[Depends(admin_only)])
