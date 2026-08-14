@@ -8,9 +8,17 @@ Image=localhost/train-api:latest
 ContainerName=train-api
 # Loopback only: reachable through Caddy, never directly from the network.
 PublishPort=127.0.0.1:8091:8000
+# Live-map snapshot is refreshed lazily, at most once per POLL_SECONDS, and
+# only when a client actually asks for it.
 Environment=POLL_SECONDS=120
-# One upstream request every POLL_SECONDS regardless of how many clients use
-# the app, so traffic on the source stays constant and low.
+# How often watched trains are re-checked for departure/delay/arrival.
+Environment=WATCH_SECONDS=180
+# Minimum change in minutes before a delay is worth a notification.
+Environment=DELAY_THRESHOLD=5
+Environment=VAPID_SUBJECT=mailto:you@example.com
+# VAPID keypair + subscription database. Named volume so a rebuild of the
+# image never destroys existing push subscriptions.
+Volume=train-api-data:/data
 NoNewPrivileges=true
 DropCapability=ALL
 

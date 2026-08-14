@@ -50,8 +50,39 @@ async function shellCacheFirst(req) {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
+  // Trip subscribe/list/delete are POSTs and must never be cached or replayed.
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   e.respondWith(url.pathname.startsWith('/api/') ? apiNetworkFirst(req) : shellCacheFirst(req));
+});
+
+
+/* ------------------------------------------------------------ push ----- */
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = {}; }
+  const title = d.title || 'Train update';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || '',
+    // Tag per trip+kind so a re-sent update replaces the old bubble instead
+    // of stacking another one on the lock screen.
+    tag: d.tag || 'train',
+    renotify: true,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data: d,
+    vibrate: d.kind === 'delay' ? [90, 60, 90] : [140],
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) {
+      if (new URL(c.url).origin === self.location.origin) return c.focus();
+    }
+    return self.clients.openWindow('/');
+  })());
 });

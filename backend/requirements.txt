@@ -2,3 +2,5 @@ fastapi==0.118.0
 uvicorn[standard]==0.37.0
 httpx==0.28.1
 orjson==3.11.3
+pywebpush==2.4.0
+cryptography==50.0.0

@@ -59,3 +59,56 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
 .err{color:var(--severe);font-size:.9rem;margin:12px 0 0}
 .foot{margin-top:28px;color:var(--muted);font-size:.75rem;text-align:center}
 #meta{font-family:ui-monospace,monospace}
+
+/* --- step flow --------------------------------------------------------- */
+.step{margin-bottom:26px}
+.step h2{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.stepno{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;
+  background:var(--accent);color:#fff;font-size:.7rem;font-weight:800;letter-spacing:0}
+.step[hidden]{display:none}
+
+/* --- station picker ---------------------------------------------------- */
+.stops{display:flex;flex-direction:column;margin-top:12px}
+.stop{display:grid;grid-template-columns:46px 18px 1fr auto;align-items:center;gap:10px;
+  width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;
+  background:none;border:0;border-radius:9px;padding:7px 6px;position:relative}
+.stop:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.stop-time{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;
+  color:var(--muted);font-variant-numeric:tabular-nums}
+.stop-dot{position:relative;display:block;width:11px;height:11px;border-radius:50%;
+  border:2px solid var(--border);background:var(--surface);margin:0 auto}
+/* The connecting rail is drawn from each dot to the next. */
+.stop:not(:last-child) .stop-dot::after{content:"";position:absolute;left:50%;top:100%;
+  width:2px;height:20px;transform:translateX(-50%);background:var(--border)}
+.stop-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stop-note{font-size:.8rem;font-weight:650;text-align:right;white-space:nowrap}
+.stop-note .exp{color:var(--muted);font-weight:500;margin-left:4px}
+.stop.is-mid .stop-dot,.stop.is-from .stop-dot,.stop.is-to .stop-dot{border-color:var(--accent)}
+.stop.is-mid .stop-dot::after,.stop.is-from .stop-dot::after{background:var(--accent)}
+.stop.is-from .stop-dot,.stop.is-to .stop-dot{background:var(--accent);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+.stop.is-from,.stop.is-to{background:color-mix(in srgb,var(--accent) 11%,transparent)}
+.stop.is-mid{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.stop.is-from .stop-name::after{content:" — board here";color:var(--accent);font-weight:650;font-size:.78rem}
+.stop.is-to .stop-name::after{content:" — get off here";color:var(--accent);font-weight:650;font-size:.78rem}
+
+/* --- notify card ------------------------------------------------------- */
+.leg-summary{margin:0 0 12px;font-size:.95rem;line-height:1.5}
+.events{margin:0 0 16px;padding-left:19px;color:var(--muted);font-size:.9rem}
+.events li{margin:3px 0}
+.events strong{color:var(--text)}
+.actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+
+/* --- watching list ----------------------------------------------------- */
+.row .rs em{font-style:normal;color:var(--muted);font-size:.78rem}
+.row.done{opacity:.55}
+.row .del{margin-left:6px;font-size:1rem;line-height:1;color:var(--muted);flex:none}
+.row .del:hover{color:var(--severe)}
+.row{cursor:default}
+.row:hover{border-color:var(--border)}
+.foot a{color:var(--accent)}
+.branches{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}
+.chip{font:inherit;font-size:.8rem;font-weight:600;padding:5px 11px;border-radius:999px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);color:var(--muted)}
+.chip.on{background:color-mix(in srgb,var(--accent) 15%,transparent);border-color:var(--accent);color:var(--accent)}
+.note{margin:0 0 8px;font-size:.82rem;color:var(--muted);font-style:italic}

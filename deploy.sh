@@ -13,7 +13,9 @@ VERSION="$(find "$ROOT/web" -type f -exec sha256sum {} + | sort -k2 | sha256sum 
 sudo mkdir -p "$DEST"
 sudo chown "$(id -un):$(id -gn)" "$DEST"
 rsync -a --delete "$ROOT/web"/ "$DEST"/
-sed -i "s/__BUILD_VERSION__/${VERSION}/" "$DEST/sw.js"
+# Stamp every reference, not just the service worker: index.html cache-busts
+# app.css and app.js with the same hash.
+grep -rl __BUILD_VERSION__ "$DEST" | xargs -r sed -i "s/__BUILD_VERSION__/${VERSION}/g"
 sudo restorecon -R "$DEST" 2>/dev/null || true
 echo "web deployed ${VERSION} -> ${DEST}"
 
