@@ -1,0 +1,22 @@
+[Unit]
+Description=Romanian train delay API (polls the public live map)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/train-api:latest
+ContainerName=train-api
+# Loopback only: reachable through Caddy, never directly from the network.
+PublishPort=127.0.0.1:8091:8000
+Environment=POLL_SECONDS=120
+# One upstream request every POLL_SECONDS regardless of how many clients use
+# the app, so traffic on the source stays constant and low.
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

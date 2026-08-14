@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Întârzieri Tren</title>
+<meta name="description" content="Live delays for trains running in Romania, with the station where each delay was measured.">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0ea5e9">
+<link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main class="wrap">
+
+  <header class="hero">
+    <img class="logo" src="/icons/icon.svg" alt="" width="52" height="52">
+    <div>
+      <h1>Întârzieri Tren</h1>
+      <p class="sub">Live delays on the Romanian network</p>
+    </div>
+    <span class="pill" id="net-pill" hidden>offline</span>
+  </header>
+
+  <form class="search" id="search" autocomplete="off">
+    <input id="q" type="text" inputmode="numeric" pattern="[0-9]*"
+           placeholder="Train number, e.g. 1575" aria-label="Train number">
+    <button class="btn" type="submit">Track</button>
+  </form>
+
+  <section id="result" hidden></section>
+  <p class="err" id="err" hidden></p>
+
+  <section class="board">
+    <div class="board-head">
+      <h2>Most delayed right now</h2>
+      <button class="link" id="refresh" type="button">refresh</button>
+    </div>
+    <div id="list" class="list"><p class="hint">loading…</p></div>
+  </section>
+
+  <footer class="foot">
+    <span id="meta">—</span>
+    <p class="hint">
+      Delays are reported by CFR staff at stations, or estimated between reports.
+      Only trains currently running appear.
+    </p>
+  </footer>
+
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
