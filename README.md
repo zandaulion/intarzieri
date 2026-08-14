@@ -44,6 +44,18 @@ arithmetic a passenger on the platform does.
 - **arrived** — once past the expected arrival at the chosen destination;
   retires the trip.
 
+A retired trip is never polled again. It stays visible in the user's list for
+`LIST_KEEP_HOURS` (12) so this morning's train is still there, and is deleted
+outright `PURGE_AFTER_HOURS` (48) after it finished so the table cannot grow
+without bound. Only retired trips are ever purged, so an overdue train that is
+still being watched is safe.
+
+Two retirement paths are distinguishable without an extra column:
+`arrived = 1` means an arrival was actually detected; `active = 0` with
+`arrived = 0` means the 6-hour fallback fired because the train stopped being
+published. The UI shows the second as *no longer tracked* rather than
+pretending it is still en route.
+
 Subscribing to a train that already left does **not** fire a departure
 notification: `trips.prime()` adopts the current state silently.
 

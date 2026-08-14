@@ -33,6 +33,12 @@ TRAIL_MINUTES = int(os.getenv("TRAIL_MINUTES", "30"))
 # computed from *scheduled* times and a train we have no live delay for yet
 # could legitimately be hours behind.
 MAX_OVERDUE = timedelta(hours=int(os.getenv("MAX_OVERDUE_HOURS", "6")))
+# A finished trip stays in the user's list this long -- long enough that this
+# morning's train is still there, short enough that last week's is not.
+LIST_KEEP = timedelta(hours=int(os.getenv("LIST_KEEP_HOURS", "12")))
+# ...and is deleted outright this long after it finished, so the table cannot
+# grow without bound.
+PURGE_AFTER = timedelta(hours=int(os.getenv("PURGE_AFTER_HOURS", "48")))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS push_subs (
@@ -143,14 +149,33 @@ async def add_trip(sub: dict, trip: dict) -> int:
     return await asyncio.to_thread(_add_trip_blocking, sub, trip)
 
 
+def _finished_at(trip: dict) -> datetime | None:
+    """When a retired trip stopped being interesting."""
+    return _iso(trip.get("last_event")) or _iso(trip.get("arr_planned"))
+
+
 def _list_trips_blocking(endpoint: str) -> list[dict]:
     with _connect() as con:
-        rows = con.execute(
-            """SELECT t.* FROM trips t JOIN push_subs s ON s.id = t.sub_id
-               WHERE s.endpoint = ? ORDER BY t.id DESC""",
-            (endpoint,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        rows = [
+            dict(r)
+            for r in con.execute(
+                """SELECT t.* FROM trips t JOIN push_subs s ON s.id = t.sub_id
+                   WHERE s.endpoint = ? ORDER BY t.id DESC""",
+                (endpoint,),
+            )
+        ]
+    # Filtered here rather than in SQL: arr_planned is an ISO string whose UTC
+    # offset shifts with DST, so lexical comparison is not safe.
+    now = datetime.now(R.RO)
+    kept = []
+    for r in rows:
+        if r["active"]:
+            kept.append(r)
+            continue
+        end = _finished_at(r)
+        if end is None or now - end <= LIST_KEEP:
+            kept.append(r)
+    return kept
 
 
 async def list_trips(endpoint: str) -> list[dict]:
@@ -396,6 +421,29 @@ async def prime(trip_id: int, rt: R.Route) -> None:
         await asyncio.to_thread(_update_blocking, trip_id, updates)
 
 
+def _purge_blocking() -> int:
+    """Drop trips that finished long ago. Only retired trips are considered,
+    so an overdue train still being watched is never removed."""
+    now = datetime.now(R.RO)
+    with _connect() as con:
+        rows = [
+            dict(r)
+            for r in con.execute(
+                "SELECT id, arr_planned, last_event FROM trips WHERE active = 0"
+            )
+        ]
+        stale = [
+            r["id"]
+            for r in rows
+            if (end := _finished_at(r)) is not None and now - end > PURGE_AFTER
+        ]
+        if stale:
+            con.executemany(
+                "DELETE FROM trips WHERE id = ?", [(i,) for i in stale]
+            )
+    return len(stale)
+
+
 async def watch_once(client) -> dict:
     """One pass over every active trip. Groups by train so N users watching
     the same train cost one upstream fetch, not N."""
@@ -431,10 +479,15 @@ async def watch_once(client) -> dict:
             if updates:
                 await asyncio.to_thread(_update_blocking, trip["id"], updates)
 
+    purged = await asyncio.to_thread(_purge_blocking)
+    if purged:
+        log.info("purged %d finished trip(s)", purged)
+
     return {
         "active": len(active),
         "polled": len(due),
         "events_sent": sent,
         "errors": errors,
+        "purged": purged,
         "at": now.isoformat(timespec="seconds"),
     }

@@ -19,6 +19,15 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString([],
   { hour: '2-digit', minute: '2-digit' }) : '--:--');
 
+// A bare HH:MM is ambiguous once a trip is not from today -- overnight trains
+// routinely arrive on the following date.
+const whenLabel = (iso) => {
+  if (!iso) return '--:--';
+  const d = new Date(iso);
+  if (d.toDateString() === new Date().toDateString()) return hhmm(iso);
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${hhmm(iso)}`;
+};
+
 const state = { route: null, branch: 0, from: null, to: null, sub: null };
 
 /* ---------------------------------------------------------------- step 1 */
@@ -243,7 +252,11 @@ async function refreshTrips() {
   $('trip-list').innerHTML = trips.length === 0
     ? '<p class="hint">Nothing yet. Pick a train above.</p>'
     : trips.map((t) => {
-        const status = t.arrived ? 'arrived' : t.departed ? 'en route' : 'not yet departed';
+        // active=0 with arrived=0 means the 6h fallback retired it: the train
+        // stopped being published before an arrival was ever seen.
+        const status = t.arrived ? 'arrived'
+          : !t.active ? 'no longer tracked'
+          : t.departed ? 'en route' : 'not yet departed';
         const d = t.last_delay;
         const delay = (d === null || d === undefined)
           ? '' : (d === 0 ? 'on time' : `${d > 0 ? '+' : ''}${d} min`);
@@ -255,7 +268,7 @@ async function refreshTrips() {
             <span class="rn">${esc(t.number)}</span>
             <span class="rs">${esc(t.from_name)} → ${esc(t.to_name)}<br>
               <em>${esc(status)}${esc(delay ? ' · ' + delay : '')}</em></span>
-            <span class="rd">${esc(hhmm(eta))}</span>
+            <span class="rd">${esc(whenLabel(eta))}</span>
             <button class="link del" data-id="${t.id}" aria-label="Stop watching">✕</button>
           </div>`;
       }).join('');
