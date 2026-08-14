@@ -1,3 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Working notes, not project content
+dns-before-cloudflare.md
+trips.db.bak-*
