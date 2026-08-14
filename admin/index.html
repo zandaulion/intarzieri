@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Train Watch — admin</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div>
+      <h1>Train Watch admin</h1>
+      <p class="sub">Tailnet only. Reaching this page is the authentication —
+        there is no password, and it is not served on the public URL.</p>
+    </div>
+  </header>
+
+  <section class="block">
+    <h2>New invite</h2>
+    <div class="card">
+      <form class="row-form" id="form-invite">
+        <input id="invite-label" placeholder="Who is it for? (optional)"
+               autocomplete="off" aria-label="Label">
+        <button class="btn" type="submit">Create invite</button>
+      </form>
+      <div id="invite-result" hidden></div>
+      <p class="err" id="invite-err" hidden></p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="head">
+      <h2>Devices</h2>
+      <button class="link" id="refresh">Refresh</button>
+    </div>
+    <div id="devices" class="list"></div>
+  </section>
+
+  <section class="block">
+    <h2>Invites</h2>
+    <div id="invites" class="list"></div>
+  </section>
+
+</div>
+<script src="admin.js"></script>
+</body>
+</html>

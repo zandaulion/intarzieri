@@ -123,6 +123,12 @@ in on iOS -- see below. Redemption is globally rate limited, since every
 request arrives from Caddy on loopback and per-IP limiting would be
 meaningless.
 
+The admin page is at **http://<tailnet-address>/admin/** — tailnet only, served
+from a root the public site never maps, and `/admin*` is explicitly 404 there
+so a later change to the public root cannot start leaking it. Being plain
+HTTP it is not a secure context, so `navigator.clipboard` does not exist and
+the copy buttons fall back to `execCommand`.
+
 Admin has **no password**: `/api/admin/*` exists only on the tailnet-only
 Caddy site, which injects `X-Admin: 1`. The public site refuses those paths
 outright *and* strips the header, so either control alone suffices. Manage it

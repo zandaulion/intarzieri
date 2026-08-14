@@ -19,6 +19,15 @@ grep -rl __BUILD_VERSION__ "$DEST" | xargs -r sed -i "s/__BUILD_VERSION__/${VERS
 sudo restorecon -R "$DEST" 2>/dev/null || true
 echo "web deployed ${VERSION} -> ${DEST}"
 
+# The admin page is served only on the tailnet listener, so it is deployed
+# to a separate root that the public site never maps.
+ADMIN_DEST="${ADMIN_DEST:-/var/www/admin}"
+sudo mkdir -p "$ADMIN_DEST"
+sudo chown "$(id -un):$(id -gn)" "$ADMIN_DEST"
+rsync -a --delete "$ROOT/admin"/ "$ADMIN_DEST"/
+sudo restorecon -R "$ADMIN_DEST" 2>/dev/null || true
+echo "admin deployed -> ${ADMIN_DEST}"
+
 if [[ "${1:-}" == "--api" ]]; then
   podman build -t localhost/train-api:latest -f "$ROOT/backend/Containerfile" "$ROOT/backend"
   cp "$ROOT/quadlet/train-api.container" "$HOME/.config/containers/systemd/"
