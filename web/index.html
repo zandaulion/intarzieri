@@ -56,6 +56,7 @@
         <button class="btn" id="btn-watch">Notify me</button>
         <button class="link" id="btn-back">Change stations</button>
       </div>
+      <p class="hint" id="cap-note" hidden></p>
       <p class="err" id="notify-err" hidden></p>
       <p class="hint" id="ios-hint" hidden>
         On iPhone, notifications only work once this page is added to the Home
@@ -68,7 +69,7 @@
   <!-- watching ------------------------------------------------------------>
   <section class="board" id="watching" hidden>
     <div class="board-head">
-      <h2>Watching</h2>
+      <h2>Watching <span class="count" id="trip-count"></span></h2>
       <button class="link" id="btn-test">Send a test notification</button>
     </div>
     <div class="list" id="trip-list"></div>

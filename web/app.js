@@ -32,7 +32,33 @@ const state = {
   route: null, branch: 0, from: null, to: null, sub: null,
   open: null,        // id of the expanded trip card
   routes: new Map(), // number|run_date -> route, so reopening is instant
+  active: 0,         // trips currently being watched
+  limit: null,       // how many may be watched at once (from the server)
 };
+
+// Only active trips occupy a slot: finished ones still shown in the list, and
+// ones waiting to be purged, do not count against the limit.
+function atCapacity() {
+  return state.limit !== null && state.active >= state.limit;
+}
+
+function updateCapUI() {
+  const btn = $('btn-watch');
+  const note = $('cap-note');
+  const full = atCapacity();
+  if (btn) btn.disabled = full;
+  if (note) {
+    note.hidden = !full;
+    note.textContent = full
+      ? `You are already watching ${state.limit} trains. Stop watching one below to add another.`
+      : '';
+  }
+  const count = $('trip-count');
+  if (count) {
+    count.textContent = state.limit === null ? '' : `${state.active} / ${state.limit}`;
+    count.classList.toggle('full', full);
+  }
+}
 
 /* ---------------------------------------------------------------- step 1 */
 $('form-train').addEventListener('submit', async (e) => {
@@ -153,6 +179,7 @@ function selectStop(i) {
       `<strong>${esc(state.route.category || '')} ${esc(state.route.number)}</strong>
        from <strong>${esc(a.name)}</strong> (${esc(a.dep_scheduled || '--:--')})
        to <strong>${esc(b.name)}</strong> (${esc(b.arr_scheduled || '--:--')})`;
+    updateCapUI();
     $('step-notify').hidden = false;
     $('step-notify').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } else {
@@ -236,7 +263,7 @@ $('btn-watch').addEventListener('click', async () => {
     // clears itself rather than leaving a spent form behind.
     resetPicker();
     btn.textContent = 'Notify me';
-    btn.disabled = false;
+    updateCapUI();
     $('watching').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (ex) {
     err.textContent = ex.message;
@@ -247,6 +274,9 @@ $('btn-watch').addEventListener('click', async () => {
     }
     btn.textContent = 'Notify me';
     btn.disabled = false;
+    // The server is the authority on the limit; a rejection means our count
+    // was stale, so resync rather than trusting it.
+    refreshTrips();
   }
 });
 
@@ -274,8 +304,12 @@ async function refreshTrips() {
 
   let trips = [];
   try {
-    ({ trips } = await api('/api/trips/list', { subscription: sub }));
+    const res = await api('/api/trips/list', { subscription: sub });
+    trips = res.trips;
+    state.active = res.active;
+    state.limit = res.limit;
   } catch { return; }
+  updateCapUI();
 
   // Keep the panel up once a subscription exists, so the test button stays
   // reachable even before anything is being watched.

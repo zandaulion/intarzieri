@@ -39,6 +39,10 @@ LIST_KEEP = timedelta(hours=int(os.getenv("LIST_KEEP_HOURS", "12")))
 # ...and is deleted outright this long after it finished, so the table cannot
 # grow without bound.
 PURGE_AFTER = timedelta(hours=int(os.getenv("PURGE_AFTER_HOURS", "48")))
+# How many trains one subscription may watch at once. Only active trips
+# count -- finished ones still sitting in the list, and ones awaiting purge,
+# do not occupy a slot.
+MAX_ACTIVE = int(os.getenv("MAX_ACTIVE_TRIPS", "5"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS push_subs (
@@ -120,9 +124,37 @@ def _upsert_sub(con: sqlite3.Connection, sub: dict) -> int:
     return row["id"]
 
 
+class TripLimitReached(Exception):
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"limit of {limit} reached")
+        self.limit = limit
+
+
+def _count_active_blocking(endpoint: str) -> int:
+    with _connect() as con:
+        row = con.execute(
+            """SELECT COUNT(*) FROM trips t JOIN push_subs s ON s.id = t.sub_id
+               WHERE s.endpoint = ? AND t.active = 1""",
+            (endpoint,),
+        ).fetchone()
+        return row[0]
+
+
+async def count_active(endpoint: str) -> int:
+    return await asyncio.to_thread(_count_active_blocking, endpoint)
+
+
 def _add_trip_blocking(sub: dict, trip: dict) -> int:
     with _connect() as con:
+        # Take the write lock before counting, so two requests arriving
+        # together cannot both see a free slot and both take it.
+        con.execute("BEGIN IMMEDIATE")
         sub_id = _upsert_sub(con, sub)
+        active = con.execute(
+            "SELECT COUNT(*) FROM trips WHERE sub_id = ? AND active = 1", (sub_id,)
+        ).fetchone()[0]
+        if active >= MAX_ACTIVE:
+            raise TripLimitReached(MAX_ACTIVE)
         cur = con.execute(
             """INSERT INTO trips (sub_id, number, run_date, from_slug, from_name,
                                   to_slug, to_name, created_at,

@@ -50,6 +50,12 @@ outright `PURGE_AFTER_HOURS` (48) after it finished so the table cannot grow
 without bound. Only retired trips are ever purged, so an overdue train that is
 still being watched is safe.
 
+One subscription may watch `MAX_ACTIVE_TRIPS` (5) trains at once. Only
+*active* trips occupy a slot -- finished ones still visible in the list, and
+ones waiting to be purged, do not. The check and the insert share a
+`BEGIN IMMEDIATE` transaction so two requests arriving together cannot both
+see the last free slot; exceeding it returns 409.
+
 Two retirement paths are distinguishable without an extra column:
 `arrived = 1` means an arrival was actually detected; `active = 0` with
 `arrived = 0` means the 6-hour fallback fired because the train stopped being

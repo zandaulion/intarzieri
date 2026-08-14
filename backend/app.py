@@ -380,20 +380,28 @@ async def create_trip(payload: dict = Body(...)):
     dep_planned = R.actual_dt(start, src.dep_scheduled, 0, src.dep_day_offset)
     arr_planned = R.actual_dt(start, dst.arr_scheduled, 0, dst.arr_day_offset)
 
-    trip_id = await trips.add_trip(
-        sub,
-        {
-            "number": rt.number,
-            "run_date": start.isoformat(),
-            "from_slug": from_slug,
-            "from_name": src.name,
-            "to_slug": to_slug,
-            "to_name": dst.name,
-            "dep_planned": dep_planned.isoformat() if dep_planned else None,
-            "arr_planned": arr_planned.isoformat() if arr_planned else None,
-            "branch_code": branch.code,
-        },
-    )
+    try:
+        trip_id = await trips.add_trip(
+            sub,
+            {
+                "number": rt.number,
+                "run_date": start.isoformat(),
+                "from_slug": from_slug,
+                "from_name": src.name,
+                "to_slug": to_slug,
+                "to_name": dst.name,
+                "dep_planned": dep_planned.isoformat() if dep_planned else None,
+                "arr_planned": arr_planned.isoformat() if arr_planned else None,
+                "branch_code": branch.code,
+            },
+        )
+    except trips.TripLimitReached as exc:
+        raise HTTPException(
+            409,
+            f"You can watch {exc.limit} trains at once. "
+            "Stop watching one before adding another.",
+        )
+
     await trips.prime(trip_id, rt)
 
     return {
@@ -415,7 +423,11 @@ async def list_trips(payload: dict = Body(...)):
     endpoint = (payload.get("subscription") or {}).get("endpoint") or payload.get("endpoint")
     if not endpoint:
         raise HTTPException(400, "subscription endpoint required")
-    return {"trips": await trips.list_trips(endpoint)}
+    return {
+        "trips": await trips.list_trips(endpoint),
+        "active": await trips.count_active(endpoint),
+        "limit": trips.MAX_ACTIVE,
+    }
 
 
 @app.post("/api/trips/{trip_id}/delete")
