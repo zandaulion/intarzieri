@@ -39,7 +39,26 @@ _BRANCH = re.compile(
     r'(.*?)(?=<div id="div-stations-branch-|\Z)'
 )
 _BRANCH_NAME = re.compile(r"(?s)<h4>\s*Parcurs tren\s*(.*?)\s*</h4>")
-_POSITION = re.compile(r"(?s)Conform itinerariului.*?(?:\.\s*<|</p>)")
+# The whole status paragraph, e.g.
+#   "102 min intarziere la trecerea fara oprire prin Radomiresti
+#    (Raportat la 21:07). Conform itinerariului, trenul se afla intre
+#    statiile Rosiori Nord - Draganesti Olt. Puteti apasa pe butonul ..."
+_SUMMARY_P = re.compile(r'(?s)<i class="fas fa-stopwatch"></i>(.*?)</p>')
+_BOILERPLATE = re.compile(r"\s*Pute\u021bi ap\u0103sa.*$", re.S)
+_S_LATE = re.compile(r"(\d+)\s*min\s+\u00eent\u00e2rziere", re.I)
+_S_EARLY = re.compile(r"(\d+)\s*min\s+mai\s+devreme", re.I)
+_S_ONTIME = re.compile(r"f\u0103r\u0103\s+\u00eent\u00e2rziere", re.I)
+# Where the delay was measured, and what the train was doing there.
+_S_WHERE = (
+    ("arrival", re.compile(r"la\s+sosirea\s+\u00een\s+(.+?)\s*(?:\(|$)")),
+    ("departure", re.compile(r"la\s+plecarea\s+din\s+(.+?)\s*(?:\(|$)")),
+    ("passing",
+     re.compile(r"la\s+trecerea(?:\s+f\u0103r\u0103\s+oprire)?\s+prin\s+(.+?)\s*(?:\(|$)")),
+    ("destination",
+     re.compile(r"ajuns\s+la\s+destina\u021bie\s+\u00een\s+(.+?)\s*(?:\(|\.|$)")),
+)
+_S_BETWEEN = re.compile(r"\u00eentre\s+sta\u021biile\s+(.+?)\s*-\s*(.+?)\s*(?:\.|$)")
+_POSITION = re.compile(r"Conform itinerariului[^.]*")
 _LI = re.compile(r'(?s)<li class="list-group-item">(.*?)</li>')
 _STATION = re.compile(r'<a href="/ro-RO/Statie/([^"?]+)\?[^"]*">\s*([^<]+?)\s*</a>')
 _KM = re.compile(r"km\s+(\d+)")
@@ -53,9 +72,6 @@ _TIMECELL = re.compile(
 )
 _DELAY = re.compile(r"([+-]?\d+)\s*min")
 _ONTIME = re.compile(r"la\s+timp", re.I)
-_SUMMARY = re.compile(
-    r"(?s)<i class=\"fas fa-stopwatch\"></i>.*?(?:<span[^>]*>\s*(.*?)\s*</span>)"
-)
 _REPORTED_AT = re.compile(r"Raportat la\s+(\d{1,2}:\d{2})")
 _TITLE = re.compile(r"span-train-category-([a-z-]+)\s*\">\s*([A-Za-z-]+)\s*</span>")
 
@@ -88,9 +104,14 @@ class Branch:
     name: str                      # e.g. "Constanța–Craiova"
     is_default: bool               # the one InfoFer shows without unfolding
     stops: list[Stop]
-    summary_delay: int | None
+    summary_delay: int | None      # negative when the train is running early
     reported_at: str | None
+    # Where that delay was measured, and what the train was doing there:
+    # "arrival" | "departure" | "passing" | "destination".
+    measured_at: str | None
+    measured_kind: str | None
     position_note: str | None      # "trenul se află între stațiile X - Y"
+    between: list[str] | None      # the same two stations, parsed out
 
     def dict(self) -> dict:
         d = asdict(self)
@@ -154,6 +175,56 @@ class Route:
 def _clean(fragment: str) -> str:
     """Tag soup -> one line of readable text."""
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", fragment)).strip(" .<")
+
+
+def _parse_summary(chunk: str) -> dict:
+    """The status paragraph: how late, when that was reported, and where.
+
+    InfoFer states the measurement point in prose -- "la plecarea din Buzău",
+    "la trecerea fără oprire prin Radomirești" -- so the place only exists as
+    part of the sentence, not as its own field.
+    """
+    out = {
+        "summary_delay": None, "reported_at": None,
+        "measured_at": None, "measured_kind": None,
+        "position_note": None, "between": None,
+    }
+    m = _SUMMARY_P.search(chunk)
+    if not m:
+        return out
+    text = _BOILERPLATE.sub("", _clean(m.group(1)))
+
+    early = _S_EARLY.search(text)
+    late = _S_LATE.search(text)
+    if early:
+        # "3 min mai devreme" is three minutes EARLY -- the sign is carried by
+        # the words, not by a minus, so it must be applied here.
+        out["summary_delay"] = -int(early.group(1))
+    elif late:
+        out["summary_delay"] = int(late.group(1))
+    elif _S_ONTIME.search(text):
+        out["summary_delay"] = 0
+
+    rep = _REPORTED_AT.search(text)
+    if rep:
+        out["reported_at"] = rep.group(1)
+
+    for kind, pattern in _S_WHERE:
+        w = pattern.search(text)
+        if w:
+            out["measured_at"] = w.group(1).strip(" .,")
+            out["measured_kind"] = kind
+            break
+
+    btw = _S_BETWEEN.search(text)
+    if btw:
+        out["between"] = [btw.group(1).strip(), btw.group(2).strip()]
+    # Only ever InfoFer's own words here -- `between` carries the structured
+    # form, so the UI can phrase it itself rather than us inventing Romanian.
+    pos = _POSITION.search(text)
+    if pos:
+        out["position_note"] = pos.group(0).strip(" .")
+    return out
 
 
 def _parse_delay(text: str) -> tuple[int | None, bool]:
@@ -242,12 +313,6 @@ def parse_route(number: str, when: str, body: str) -> Route:
         n = _BRANCH_NAME.search(chunk)
         if n:
             name = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", n.group(1))).strip()
-        delay = None
-        sm = _SUMMARY.search(chunk)
-        if sm:
-            delay, _ = _parse_delay(sm.group(1) or "")
-        rep = _REPORTED_AT.search(chunk)
-        pos = _POSITION.search(chunk)
         branches.append(
             Branch(
                 code=code,
@@ -255,9 +320,7 @@ def parse_route(number: str, when: str, body: str) -> Route:
                 # InfoFer collapses the alternates with d-none.
                 is_default="d-none" not in attrs,
                 stops=stops,
-                summary_delay=delay,
-                reported_at=rep.group(1) if rep else None,
-                position_note=_clean(pos.group(0)) if pos else None,
+                **_parse_summary(chunk),
             )
         )
 
@@ -265,20 +328,13 @@ def parse_route(number: str, when: str, body: str) -> Route:
         # No branch wrappers at all -- older/simpler pages list stops directly.
         stops = _parse_stops(body)
         if stops:
-            delay = None
-            sm = _SUMMARY.search(body)
-            if sm:
-                delay, _ = _parse_delay(sm.group(1) or "")
-            rep = _REPORTED_AT.search(body)
             branches.append(
                 Branch(
                     code="0",
                     name=f"{stops[0].name}–{stops[-1].name}",
                     is_default=True,
                     stops=stops,
-                    summary_delay=delay,
-                    reported_at=rep.group(1) if rep else None,
-                    position_note=None,
+                    **_parse_summary(body),
                 )
             )
 

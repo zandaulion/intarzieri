@@ -309,7 +309,10 @@ async def train_route(number: str, when: str | None = Query(None, alias="date"))
             "is_default": b.is_default,
             "summary_delay": b.summary_delay,
             "reported_at": b.reported_at,
+            "measured_at": b.measured_at,
+            "measured_kind": b.measured_kind,
             "position_note": b.position_note,
+            "between": b.between,
             "stops": stops,
         }
 

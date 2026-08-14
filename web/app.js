@@ -120,7 +120,8 @@ function renderRoute() {
       <span class="tag">${esc(r.run_date)}</span>
     </div>
     ${picker}
-    ${br.position_note ? `<p class="note">${esc(br.position_note)}</p>` : ''}
+    ${positionLine(br) ? `<p class="note">${positionLine(br)}</p>` : ''}
+    ${summaryLine(br) ? `<p class="hint">${summaryLine(br)}</p>` : ''}
     <p class="hint">${esc(hint)}</p>
     <div class="stops">${rows}</div>`;
 
@@ -355,6 +356,35 @@ function applyOpenState(trips) {
   if (trip) showTripDetail(trip);
 }
 
+// InfoFer states where a delay was measured in prose ("la plecarea din X").
+// route.py parses the place and the verb out; this turns them back into a
+// sentence, in English like the rest of the UI.
+const MEASURED = {
+  arrival: (p) => `arriving in ${p}`,
+  departure: (p) => `leaving ${p}`,
+  passing: (p) => `passing ${p}`,
+  destination: (p) => `arriving at its destination, ${p}`,
+};
+
+function summaryLine(br) {
+  const d = br.summary_delay;
+  if (d === null || d === undefined) return '';
+  const head = d > 0 ? `Reported ${d} min late`
+    : d < 0 ? `Reported ${-d} min early`
+    : 'Reported on time';
+  const when = br.reported_at ? ` at ${br.reported_at}` : '';
+  const where = br.measured_at && MEASURED[br.measured_kind]
+    ? `, ${MEASURED[br.measured_kind](br.measured_at)}` : '';
+  return esc(`${head}${when}${where}`);
+}
+
+function positionLine(br) {
+  if (br.between && br.between.length === 2) {
+    return esc(`Between ${br.between[0]} and ${br.between[1]}`);
+  }
+  return br.position_note ? esc(br.position_note) : '';
+}
+
 function renderDetail(host, trip, route) {
   const br = route.branches.find((b) => b.code === trip.branch_code)
     || route.branches.find((b) => {
@@ -364,12 +394,11 @@ function renderDetail(host, trip, route) {
     || route.branches[0];
 
   const idx = (slug) => br.stops.findIndex((x) => x.slug === slug);
+  const pos = positionLine(br);
+  const sum = summaryLine(br);
   host.innerHTML = `
-    ${br.position_note ? `<p class="note">${esc(br.position_note)}</p>` : ''}
-    ${br.summary_delay !== null && br.summary_delay !== undefined
-        ? `<p class="hint">Reported ${esc(br.summary_delay)} min late${
-             br.reported_at ? ` at ${esc(br.reported_at)}` : ''}</p>`
-        : ''}
+    ${pos ? `<p class="note">${pos}</p>` : ''}
+    ${sum ? `<p class="hint">${sum}</p>` : ''}
     <div class="stops">${stopRows(br.stops,
         { from: idx(trip.from_slug), to: idx(trip.to_slug) })}</div>`;
 }

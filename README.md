@@ -62,6 +62,22 @@ notification: `trips.prime()` adopts the current state silently.
 Values InfoFer marks with `*` are its own projection between staff reports
 rather than a report; the UI tags these `est`.
 
+### Reading the status line
+
+InfoFer states the delay, the time it was reported and *where* it was measured
+as one Romanian sentence, so the place only exists as prose:
+
+| Published | Parsed |
+|---|---|
+| `98 min întârziere la plecarea din Târgu Ocna (Raportat la 20:59)` | +98, 20:59, Târgu Ocna, `departure` |
+| `102 min întârziere la trecerea fără oprire prin Radomirești` | +102, Radomirești, `passing` |
+| `166 min întârziere la sosirea în Galați` | +166, Galați, `arrival` |
+| `Fără întârziere, ajuns la destinație în Ploiești Sud` | 0, Ploiești Sud, `destination` |
+| `3 min mai devreme, între stațiile Brazi - Ploiești Sud` | **-3**, between Brazi/Ploiești Sud |
+
+Note the last one: *mai devreme* means **early**, and the sign is carried by
+the words rather than a minus, so it has to be applied when parsing.
+
 ## Load on the source
 
 - The live map is fetched **lazily** — only when a client asks and the cached
