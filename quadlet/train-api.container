@@ -17,8 +17,12 @@ Environment=WATCH_SECONDS=180
 Environment=DELAY_THRESHOLD=5
 Environment=VAPID_SUBJECT=mailto:you@example.com
 # Used to render invite links; the code alone still works by hand.
-Environment=PUBLIC_BASE_URL=https://<public-host>
+Environment=PUBLIC_BASE_URL=https://trains.example.com
 Environment=INVITE_TTL_DAYS=7
+# Grace period after an invite's first use during which it re-binds the same
+# device instead of being spent. Covers "tapped it in WhatsApp, then installed
+# the app properly" without leaving the link live for a week.
+Environment=INVITE_REBIND_MINUTES=60
 # VAPID keypair + subscription database. Named volume so a rebuild of the
 # image never destroys existing push subscriptions.
 Volume=train-api-data:/data

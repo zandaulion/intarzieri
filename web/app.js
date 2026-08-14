@@ -472,9 +472,68 @@ async function showTripDetail(trip) {
 
 
 /* ------------------------------------------------------------- gate / boot */
+/* Android WebView reports "; wv)"; the big chat apps ship their own browser.
+   Either way the cookie jar is separate from Chrome's, so registering inside
+   one strands the credential where the installed PWA can never read it. */
+function inAppBrowser() {
+  const ua = navigator.userAgent || '';
+  return /\bwv\b/.test(ua)
+    || /(FBAN|FBAV|Instagram|Line\/|WhatsApp|Snapchat|Messenger)/i.test(ua);
+}
+
+const isAndroid = () => /Android/i.test(navigator.userAgent || '');
+
+async function copyText(text, btn) {
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text); ok = true;
+    }
+  } catch { ok = false; }
+  if (!ok) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    document.body.removeChild(ta);
+  }
+  if (btn) {
+    const was = btn.textContent;
+    btn.textContent = ok ? 'Copied' : 'Select it manually';
+    setTimeout(() => { btn.textContent = was; }, 1800);
+  }
+}
+
+function setupInApp(code) {
+  const box = $('gate-inapp');
+  box.hidden = !inAppBrowser();
+  if (box.hidden) return;
+
+  const url = `${location.origin}/i/${encodeURIComponent(code || '')}`;
+  const chrome = $('open-chrome');
+  if (isAndroid() && code) {
+    // Navigating to intent:// hands the URL to Chrome. Android-only; there is
+    // no equivalent on iOS, where the instructions below are the whole answer.
+    chrome.href = 'intent://' + url.replace(/^https?:\/\//, '')
+      + '#Intent;scheme=https;package=com.android.chrome;'
+      + 'S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+    chrome.hidden = false;
+  }
+  $('inapp-note').textContent = isAndroid()
+    ? 'In Chrome: install the app from the ⋮ menu, open it from your home '
+      + 'screen, then enter the code. You can activate more than once in the '
+      + 'first hour, so a tap here is not wasted.'
+    : 'Open trains.example.com in Safari, add it to your Home Screen, '
+      + 'open it from there, then enter the code.';
+  $('copy-code').onclick = () => copyText(code || $('invite-code').value, $('copy-code'));
+}
+
 function showGate(prefill) {
   $('gate').hidden = false;
   $('app').hidden = true;
+  setupInApp(prefill);
   if (prefill) {
     $('invite-code').value = prefill;
     $('gate-title').textContent = 'Activate this device';

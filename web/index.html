@@ -39,6 +39,16 @@
         <button class="btn" type="submit" id="btn-activate">Activate</button>
       </form>
       <p class="err" id="gate-err" hidden></p>
+      <div class="warn" id="gate-inapp" hidden>
+        <strong>You opened this inside WhatsApp's browser.</strong>
+        It keeps its own cookies, so an app installed later will not be signed
+        in. Continue in your real browser instead — the code comes with you.
+        <div class="warn-actions">
+          <a class="btn" id="open-chrome" href="#" hidden>Open in Chrome</a>
+          <button class="btn ghost" id="copy-code" type="button">Copy code</button>
+        </div>
+        <p class="warn-note" id="inapp-note"></p>
+      </div>
       <p class="hint">
         Each invite registers one device. Another phone or laptop needs its
         own invite.

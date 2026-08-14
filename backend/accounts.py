@@ -27,6 +27,13 @@ COOKIE_NAME = "tw_device"
 COOKIE_MAX_AGE = 400 * 24 * 3600
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() != "false"
 INVITE_TTL = timedelta(days=int(os.getenv("INVITE_TTL_DAYS", "7")))
+# An invite stays redeemable for this long after its FIRST use, re-binding the
+# same device rather than creating another. Chat apps open links in their own
+# browser, whose cookie jar the installed PWA cannot read, so the realistic
+# flow is: redeem in WhatsApp's viewer, install properly, redeem again. The
+# window is absolute -- it does not slide with each use -- so a forwarded link
+# is not a week-long open door.
+INVITE_REBIND = timedelta(minutes=int(os.getenv("INVITE_REBIND_MINUTES", "60")))
 
 # Unambiguous alphabet: no I/1, no O/0, so a code can be read aloud or typed
 # from a phone screen without confusion. 12 chars = ~60 bits.
@@ -240,14 +247,23 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
         ).fetchone()
         if not row:
             raise InviteError("That invite code is not valid.")
-        if row["used_at"]:
-            raise InviteError("That invite has already been used.")
-        if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+        now = datetime.now(timezone.utc)
+        if datetime.fromisoformat(row["expires_at"]) < now:
             raise InviteError("That invite has expired. Ask for a new one.")
 
+        rebind_to = None
+        if row["used_at"]:
+            first = datetime.fromisoformat(row["used_at"])
+            if now - first <= INVITE_REBIND and row["device_id"]:
+                # Same device, new token: whichever browser redeems last wins,
+                # and the earlier context is signed out by the rotation.
+                rebind_to = row["device_id"]
+            else:
+                raise InviteError("That invite has already been used.")
+
         token = new_device_token()
-        if row["adopt_id"]:
-            device_id = row["adopt_id"]
+        if rebind_to or row["adopt_id"]:
+            device_id = rebind_to or row["adopt_id"]
             con.execute(
                 "UPDATE devices SET token_hash = ?, revoked = 0 WHERE id = ?",
                 (_hash(token), device_id),
@@ -259,8 +275,10 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
             )
             device_id = cur.lastrowid
 
+        # Keep the original used_at so the grace window stays absolute.
         con.execute(
-            "UPDATE invites SET used_at = ?, device_id = ? WHERE id = ?",
+            "UPDATE invites SET used_at = COALESCE(used_at, ?), device_id = ? "
+            "WHERE id = ?",
             (_now(), device_id, row["id"]),
         )
         return device_id, token

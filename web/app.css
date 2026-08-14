@@ -172,3 +172,11 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
 #invite-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   text-transform:uppercase;letter-spacing:.08em}
 #gate .hint{margin-top:10px}
+.warn{background:color-mix(in srgb,var(--slight) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--slight) 45%,transparent);
+  color:var(--text);border-radius:10px;padding:11px 13px;font-size:.86rem;
+  line-height:1.5;margin:12px 0 0}
+.warn-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}
+.warn-actions .btn{text-decoration:none;display:inline-block;font-size:.85rem;padding:8px 15px}
+.btn.ghost{background:none;color:var(--accent);border:1px solid var(--accent)}
+.warn-note{margin:10px 0 0;font-size:.8rem;color:var(--muted);line-height:1.5}
