@@ -159,6 +159,21 @@ function selectStop(i) {
   }
 }
 
+/* Back to a clean step 1: used after subscribing, so the next train can be
+   looked up without clearing a stale route by hand. */
+function resetPicker() {
+  state.route = null;
+  state.branch = 0;
+  state.from = state.to = null;
+  $('number').value = '';
+  $('route-card').innerHTML = '';
+  $('step-leg').hidden = true;
+  $('step-notify').hidden = true;
+  $('train-err').hidden = true;
+  $('notify-err').hidden = true;
+  $('ios-hint').hidden = true;
+}
+
 $('btn-back').addEventListener('click', () => {
   state.from = state.to = null;
   renderRoute();
@@ -215,10 +230,13 @@ $('btn-watch').addEventListener('click', async () => {
       from_slug: a.slug,
       to_slug: b.slug,
     });
-    btn.textContent = 'Watching ✓';
     await refreshTrips();
+    // The new card in the watching list is the confirmation, so the picker
+    // clears itself rather than leaving a spent form behind.
+    resetPicker();
+    btn.textContent = 'Notify me';
+    btn.disabled = false;
     $('watching').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    setTimeout(() => { btn.textContent = 'Notify me'; btn.disabled = false; }, 1800);
   } catch (ex) {
     err.textContent = ex.message;
     err.hidden = false;
