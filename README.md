@@ -240,8 +240,8 @@ Assets are stamped with a content hash so the service worker and the
   browser, or private browsing all need a fresh invite. Storage for a
   *non-installed* site on iOS is evicted after 7 days idle, which is another
   reason to install to the Home Screen.
-- The Funnel URL is public regardless; the gate is application-level, so an
-  unregistered visitor can load the shell but can do nothing with it.
+- The public hostname is reachable by anyone; the gate is application-level,
+  so an unregistered visitor can load the shell but can do nothing with it.
 - **iOS** only exposes Web Push to PWAs installed to the Home Screen.
 - Delays are reported by station staff, so they are as accurate — and as
   granular — as those reports.
