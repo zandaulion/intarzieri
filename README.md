@@ -142,6 +142,17 @@ with `./admin.sh`.
 An unregistered device gets 401 from every endpoint except `/api/health`,
 which exposes no user data and is left open for monitoring.
 
+### Installing
+
+The app shows an install bar when it is running in a browser rather than
+standalone. On Chromium it captures `beforeinstallprompt` (suppressing
+Chrome's own mini-infobar) and triggers the real install dialog; the event
+fires only if the manifest, icons and a `fetch`-handling service worker are
+all in order, so a missing install button means one of those broke. Safari
+never fires it, so on iOS the bar explains the Share menu instead. Dismissal
+is remembered in `localStorage`, and the bar hides itself once
+`display-mode: standalone` matches.
+
 ### iOS
 
 Safari and an installed PWA have **separate storage**, so a code redeemed in

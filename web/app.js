@@ -224,6 +224,52 @@ const b64ToBytes = (b64) => {
 const standalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+
+/* Chrome fires beforeinstallprompt and lets us trigger the real install
+   dialog. Safari never fires it, so on iOS the only option is telling the
+   user where the Share button is -- which matters more there, because iOS
+   only delivers push to an installed app. */
+let installPrompt = null;
+const DISMISSED = 'tw-install-dismissed';
+
+function refreshInstallBar() {
+  const bar = $('install');
+  if (!bar) return;
+  if (standalone() || localStorage.getItem(DISMISSED)) {
+    bar.hidden = true;
+    return;
+  }
+  if (installPrompt) {
+    $('btn-install').hidden = false;
+    $('install-note').textContent =
+      'Add it to your home screen so notifications arrive reliably and it '
+      + 'opens like an app.';
+    bar.hidden = false;
+  } else if (isIOS()) {
+    $('btn-install').hidden = true;
+    $('install-title').textContent = 'Add to Home Screen';
+    $('install-note').textContent =
+      'Tap the Share button below, then "Add to Home Screen". On iPhone '
+      + 'notifications only work from the installed app.';
+    bar.hidden = false;
+  } else {
+    bar.hidden = true;
+  }
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Suppress Chrome's own mini-infobar so the button below is the one path.
+  e.preventDefault();
+  installPrompt = e;
+  refreshInstallBar();
+});
+
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  $('install').hidden = true;
+});
+
 async function getSubscription() {
   if (state.sub) return state.sub;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -285,6 +331,24 @@ $('btn-watch').addEventListener('click', async () => {
     // was stale, so resync rather than trusting it.
     refreshTrips();
   }
+});
+
+$('btn-install').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  installPrompt = null;              // a prompt can only be used once
+  $('install').hidden = true;
+  prompt.prompt();
+  const { outcome } = await prompt.userChoice;
+  if (outcome !== 'accepted') {
+    installPrompt = prompt;
+    refreshInstallBar();
+  }
+});
+
+$('btn-install-dismiss').addEventListener('click', () => {
+  try { localStorage.setItem(DISMISSED, '1'); } catch { /* private mode */ }
+  $('install').hidden = true;
 });
 
 $('btn-test').addEventListener('click', async () => {
@@ -549,6 +613,7 @@ function showGate(prefill) {
 function showApp() {
   $('gate').hidden = true;
   $('app').hidden = false;
+  refreshInstallBar();
 }
 
 $('form-code').addEventListener('submit', async (e) => {

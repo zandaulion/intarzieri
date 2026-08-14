@@ -180,3 +180,15 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
 .warn-actions .btn{text-decoration:none;display:inline-block;font-size:.85rem;padding:8px 15px}
 .btn.ghost{background:none;color:var(--accent);border:1px solid var(--accent)}
 .warn-note{margin:10px 0 0;font-size:.8rem;color:var(--muted);line-height:1.5}
+
+/* --- install prompt ---------------------------------------------------- */
+.install{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:color-mix(in srgb,var(--accent) 10%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);
+  border-radius:13px;padding:13px 15px;margin-bottom:20px}
+.install[hidden]{display:none}
+.install-text{flex:1;min-width:200px;font-size:.88rem;line-height:1.5}
+.install-text strong{display:block;margin-bottom:2px}
+.install-text span{color:var(--muted)}
+.install-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.install-actions .btn{padding:9px 17px;font-size:.88rem}
