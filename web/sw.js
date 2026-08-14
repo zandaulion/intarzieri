@@ -86,3 +86,31 @@ self.addEventListener('notificationclick', (e) => {
     return self.clients.openWindow('/');
   })());
 });
+
+/* The browser may replace a push subscription at any time. Until this was
+   handled, a rotation stranded the device's trips behind a dead endpoint and
+   notifications simply stopped, silently. The device cookie rides along with
+   this fetch, so the server knows whose subscription to update. */
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil((async () => {
+    try {
+      const old = e.oldSubscription || await self.registration.pushManager.getSubscription();
+      let fresh = e.newSubscription;
+      if (!fresh) {
+        const key = old && old.options && old.options.applicationServerKey;
+        if (!key) return;
+        fresh = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: key,
+        });
+      }
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: fresh.toJSON() }),
+      });
+    } catch (err) {
+      // Nothing useful to do here; the next app open re-registers.
+    }
+  })());
+});

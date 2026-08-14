@@ -2,14 +2,20 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const api = (path, body) =>
-  fetch(path, body ? {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  } : undefined).then(async (r) => {
+class ApiError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+
+// Cookies ride along on same-origin fetches by default, which is the whole
+// of the auth story: the device token never touches JavaScript.
+const api = (path, body, method) =>
+  fetch(path, {
+    method: method || (body ? 'POST' : 'GET'),
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  }).then(async (r) => {
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `Request failed (${r.status})`);
+    if (!r.ok) throw new ApiError(r.status, data.detail || `Request failed (${r.status})`);
     return data;
   });
 
@@ -237,6 +243,7 @@ async function getSubscription() {
     });
   }
   state.sub = sub.toJSON();
+  await api('/api/push/subscribe', { subscription: state.sub });
   return state.sub;
 }
 
@@ -292,28 +299,31 @@ $('btn-test').addEventListener('click', async () => {
 
 /* -------------------------------------------------------------- watching */
 async function refreshTrips() {
-  let sub;
+  // Remember an existing push subscription if there is one, but do not
+  // require it: a registered device can browse before granting permission.
   try {
-    if (!('serviceWorker' in navigator)) return;
-    const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-    if (!existing) return;
-    sub = existing.toJSON();
-    state.sub = sub;
-  } catch { return; }
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) state.sub = existing.toJSON();
+    }
+  } catch { /* no subscription yet */ }
 
   let trips = [];
   try {
-    const res = await api('/api/trips/list', { subscription: sub });
+    const res = await api('/api/trips');
     trips = res.trips;
     state.active = res.active;
     state.limit = res.limit;
-  } catch { return; }
+  } catch (ex) {
+    if (ex instanceof ApiError && ex.status === 401) showGate('');
+    return;
+  }
   updateCapUI();
 
   // Keep the panel up once a subscription exists, so the test button stays
   // reachable even before anything is being watched.
-  $('watching').hidden = trips.length === 0 && !state.sub;
+  $('watching').hidden = false;
   $('trip-list').innerHTML = trips.length === 0
     ? '<p class="hint">Nothing yet. Pick a train above.</p>'
     : trips.map((t) => {
@@ -349,7 +359,7 @@ async function refreshTrips() {
     el.addEventListener('click', async (e) => {
       // Sits inside the row, which is itself a toggle.
       e.stopPropagation();
-      await api(`/api/trips/${el.dataset.id}/delete`, { subscription: state.sub });
+      await api(`/api/trips/${el.dataset.id}`, null, 'DELETE');
       if (state.open === Number(el.dataset.id)) state.open = null;
       refreshTrips();
     });
@@ -461,8 +471,74 @@ async function showTripDetail(trip) {
 }
 
 
-/* ------------------------------------------------------------------ boot */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(refreshTrips).catch(() => {});
+/* ------------------------------------------------------------- gate / boot */
+function showGate(prefill) {
+  $('gate').hidden = false;
+  $('app').hidden = true;
+  if (prefill) {
+    $('invite-code').value = prefill;
+    $('gate-title').textContent = 'Activate this device';
+    $('gate-lead').textContent =
+      'This invite registers the device you are reading this on. It can only '
+      + 'be used once.';
+    // Deliberately not auto-submitted: a link preview fetch must never be
+    // able to spend the invite, so redemption needs a real tap.
+    $('btn-activate').textContent = 'Activate this device';
+  }
 }
-setInterval(refreshTrips, 60000);
+
+function showApp() {
+  $('gate').hidden = true;
+  $('app').hidden = false;
+}
+
+$('form-code').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('gate-err');
+  err.hidden = true;
+  const btn = $('btn-activate');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Activating…';
+  try {
+    await api('/api/invites/redeem', { code: $('invite-code').value });
+    history.replaceState({}, '', '/');
+    showApp();
+    await start();
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
+let started = false;
+async function start() {
+  if (started) return;
+  started = true;
+  if ('serviceWorker' in navigator) {
+    try { await navigator.serviceWorker.register('/sw.js'); } catch { /* ignore */ }
+  }
+  await refreshTrips();
+  setInterval(refreshTrips, 60000);
+}
+
+async function boot() {
+  const invite = location.pathname.match(/^\/i\/(.+)$/);
+  if (invite) {
+    showGate(decodeURIComponent(invite[1]));
+    return;
+  }
+  try {
+    const me = await api('/api/me');
+    state.limit = me.limit;
+    showApp();
+    await start();
+  } catch (ex) {
+    if (ex instanceof ApiError && ex.status === 401) showGate('');
+    else { showGate(''); $('gate-err').textContent = ex.message; $('gate-err').hidden = false; }
+  }
+}
+
+boot();

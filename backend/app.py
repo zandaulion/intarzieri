@@ -21,9 +21,10 @@ from pathlib import Path
 
 import httpx
 import orjson
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import ORJSONResponse
 
+import accounts
 import iris
 import push
 import route as R
@@ -203,10 +204,49 @@ async def watcher() -> None:
         await asyncio.sleep(WATCH_SECONDS)
 
 
+# --------------------------------------------------------------------------
+# access control
+# --------------------------------------------------------------------------
+async def current_device(request: Request) -> dict:
+    """Every device-facing endpoint hangs off this.
+
+    Identity is a random token in an HttpOnly cookie, issued when an invite is
+    redeemed -- there are no accounts to log into.
+    """
+    token = request.cookies.get(accounts.COOKIE_NAME)
+    device = await accounts.device_by_token(token) if token else None
+    if not device:
+        raise HTTPException(
+            401, "This device is not registered. You need an invite link to use this app."
+        )
+    return device
+
+
+async def admin_only(x_admin: str | None = Header(None)) -> None:
+    """Admin lives on the tailnet-only Caddy site, which sets X-Admin.
+
+    The public site both refuses /api/admin/* outright and strips the header,
+    so either control alone is enough -- being on the tailnet is the whole
+    authentication story.
+    """
+    if x_admin != "1":
+        raise HTTPException(404, "Not Found")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _client
-    trips.init()
+    adopted = trips.init()
+    # A device that predates cookie identity has no way to prove who it is.
+    # Mint a one-shot invite that binds it back to its existing trips, and
+    # log the code -- it is only reachable from the server console.
+    for device_id in adopted:
+        code = await accounts.create_invite("adopted", adopt_id=device_id)
+        log.warning(
+            "ADOPTION INVITE for pre-existing device %s: %s "
+            "(redeem from that browser to keep its trips)",
+            device_id, code,
+        )
     app.state.last_watch = None
     _client = httpx.AsyncClient(
         follow_redirects=True,
@@ -251,6 +291,7 @@ async def trains(
     delayed_only: bool = Query(False),
     min_delay: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    device: dict = Depends(current_device),
 ):
     await ensure_map()
     items = store.trains
@@ -261,7 +302,7 @@ async def trains(
 
 
 @app.get("/api/train/{number}")
-async def train(number: str):
+async def train(number: str, device: dict = Depends(current_device)):
     await ensure_map()
     key = number.lstrip("0") or number
     t = store.by_number.get(key) or store.by_number.get(number)
@@ -278,7 +319,11 @@ async def train(number: str):
 # itinerary + trip subscriptions
 # --------------------------------------------------------------------------
 @app.get("/api/route/{number}")
-async def train_route(number: str, when: str | None = Query(None, alias="date")):
+async def train_route(
+    number: str,
+    when: str | None = Query(None, alias="date"),
+    device: dict = Depends(current_device),
+):
     """The station list for one train, with live per-station delays."""
     try:
         day = date.fromisoformat(when) if when else datetime.now(R.RO).date()
@@ -327,15 +372,17 @@ async def train_route(number: str, when: str | None = Query(None, alias="date"))
 
 
 @app.get("/api/vapid")
-async def vapid_key():
+async def vapid_key(device: dict = Depends(current_device)):
     return {"publicKey": push.vapid.public_key}
 
 
 @app.post("/api/trips")
-async def create_trip(payload: dict = Body(...)):
+async def create_trip(
+    payload: dict = Body(...), device: dict = Depends(current_device)
+):
     sub = payload.get("subscription") or {}
-    if not sub.get("endpoint") or not (sub.get("keys") or {}).get("auth"):
-        raise HTTPException(400, "a complete push subscription is required")
+    if sub and (not sub.get("endpoint") or not (sub.get("keys") or {}).get("auth")):
+        raise HTTPException(400, "that push subscription is incomplete")
 
     number = str(payload.get("number") or "").strip()
     from_slug = payload.get("from_slug")
@@ -382,6 +429,7 @@ async def create_trip(payload: dict = Body(...)):
 
     try:
         trip_id = await trips.add_trip(
+            device["id"],
             sub,
             {
                 "number": rt.number,
@@ -416,35 +464,50 @@ async def create_trip(payload: dict = Body(...)):
     }
 
 
-@app.post("/api/trips/list")
-async def list_trips(payload: dict = Body(...)):
-    """POST, not GET: the endpoint URL is a credential and does not belong
-    in a query string that ends up in logs."""
-    endpoint = (payload.get("subscription") or {}).get("endpoint") or payload.get("endpoint")
-    if not endpoint:
-        raise HTTPException(400, "subscription endpoint required")
+@app.get("/api/trips")
+async def list_trips(device: dict = Depends(current_device)):
     return {
-        "trips": await trips.list_trips(endpoint),
-        "active": await trips.count_active(endpoint),
+        "trips": await trips.list_trips(device["id"]),
+        "active": await trips.count_active(device["id"]),
         "limit": trips.MAX_ACTIVE,
     }
 
 
-@app.post("/api/trips/{trip_id}/delete")
-async def remove_trip(trip_id: int, payload: dict = Body(...)):
-    endpoint = (payload.get("subscription") or {}).get("endpoint") or payload.get("endpoint")
-    if not endpoint:
-        raise HTTPException(400, "subscription endpoint required")
-    if not await trips.delete_trip(trip_id, endpoint):
-        raise HTTPException(404, "no such trip for this subscription")
+@app.delete("/api/trips/{trip_id}")
+async def remove_trip(trip_id: int, device: dict = Depends(current_device)):
+    if not await trips.delete_trip(trip_id, device["id"]):
+        raise HTTPException(404, "no such trip on this device")
     return {"deleted": trip_id}
 
 
-@app.post("/api/push/test")
-async def push_test(payload: dict = Body(...)):
+@app.get("/api/me")
+async def me(device: dict = Depends(current_device)):
+    return {
+        "device": {"id": device["id"], "label": device["label"]},
+        "limit": trips.MAX_ACTIVE,
+    }
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(
+    payload: dict = Body(...), device: dict = Depends(current_device)
+):
+    """Called on first subscribe and again from pushsubscriptionchange, so a
+    rotated endpoint updates the device's row rather than orphaning it."""
     sub = payload.get("subscription") or {}
-    if not sub.get("endpoint"):
-        raise HTTPException(400, "subscription required")
+    if not sub.get("endpoint") or not (sub.get("keys") or {}).get("auth"):
+        raise HTTPException(400, "a complete push subscription is required")
+    await trips.save_subscription(device["id"], sub)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+async def push_test(
+    payload: dict = Body(default={}), device: dict = Depends(current_device)
+):
+    sub = payload.get("subscription") or {}
+    if sub.get("endpoint"):
+        await trips.save_subscription(device["id"], sub)
     ok, status = await push.send(
         sub,
         {
@@ -456,3 +519,87 @@ async def push_test(payload: dict = Body(...)):
         },
     )
     return {"delivered": ok, "status": status}
+
+
+# --------------------------------------------------------------------------
+# invites and devices
+# --------------------------------------------------------------------------
+@app.post("/api/invites/redeem")
+async def redeem_invite(response: Response, payload: dict = Body(...)):
+    """Deliberately POST-only.
+
+    Chat apps fetch shared links to build previews. If opening the invite URL
+    redeemed it, WhatsApp would burn the invite before the recipient ever
+    tapped anything -- so redemption needs a real user action, and preview
+    bots do not POST.
+    """
+    if accounts.throttled():
+        raise HTTPException(429, "Too many attempts. Wait a minute and try again.")
+
+    code = accounts.normalise_code(payload.get("code") or "")
+    if not code:
+        raise HTTPException(400, "That does not look like an invite code.")
+
+    try:
+        device_id, token = await accounts.redeem(code)
+    except accounts.InviteError as exc:
+        raise HTTPException(400, str(exc))
+
+    response.set_cookie(
+        accounts.COOKIE_NAME,
+        token,
+        max_age=accounts.COOKIE_MAX_AGE,
+        httponly=True,
+        secure=accounts.COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    log.info("device %s registered via invite", device_id)
+    return {"ok": True, "device_id": device_id}
+
+
+@app.get("/api/admin/devices", dependencies=[Depends(admin_only)])
+async def admin_devices():
+    return {"devices": await accounts.list_devices()}
+
+
+@app.post("/api/admin/devices/{device_id}/revoke", dependencies=[Depends(admin_only)])
+async def admin_revoke_device(device_id: int, payload: dict = Body(default={})):
+    revoked = bool(payload.get("revoked", True))
+    if not await accounts.set_revoked(device_id, revoked):
+        raise HTTPException(404, "no such device")
+    return {"id": device_id, "revoked": revoked}
+
+
+@app.post("/api/admin/devices/{device_id}/label", dependencies=[Depends(admin_only)])
+async def admin_label_device(device_id: int, payload: dict = Body(...)):
+    label = (payload.get("label") or "").strip()[:60]
+    if not await accounts.rename_device(device_id, label):
+        raise HTTPException(404, "no such device")
+    return {"id": device_id, "label": label}
+
+
+@app.get("/api/admin/invites", dependencies=[Depends(admin_only)])
+async def admin_invites():
+    return {"invites": await accounts.list_invites(), "ttl_days": accounts.INVITE_TTL.days}
+
+
+@app.post("/api/admin/invites", dependencies=[Depends(admin_only)])
+async def admin_create_invite(payload: dict = Body(default={})):
+    label = (payload.get("label") or "").strip()[:60] or None
+    adopt_id = payload.get("adopt_id")
+    code = await accounts.create_invite(label, adopt_id)
+    base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    return {
+        "code": code,
+        "url": f"{base}/i/{code}" if base else None,
+        "expires_in_days": accounts.INVITE_TTL.days,
+        "label": label,
+    }
+
+
+@app.post("/api/admin/invites/{invite_id}/revoke", dependencies=[Depends(admin_only)])
+async def admin_revoke_invite(invite_id: int):
+    if not await accounts.revoke_invite(invite_id):
+        raise HTTPException(404, "no such unused invite")
+    return {"revoked": invite_id}

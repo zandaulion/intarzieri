@@ -93,10 +93,58 @@ the words rather than a minus, so it has to be applied when parsing.
   arrival + delay + `MAX_OVERDUE_HOURS`), and **grouped by train** — ten people
   watching the same train cost one fetch, not ten.
 
+## Access control
+
+Invite-only, no usernames or passwords. A device proves who it is with a
+random token in an **HttpOnly cookie**, so the credential never touches
+JavaScript. Trips belong to a device, so two phones never see each other's
+trains, and one invite registers exactly one device -- "a second phone needs
+a second invite" falls out of single-use invites rather than being a rule.
+
+```
+you (on the tailnet) --> ./admin.sh invite "Ana"
+                             |
+                             v   https://.../i/ABCD-EFGH-JKLM   (WhatsApp)
+                    recipient opens --> taps "Activate this device"
+                             |                    POST
+                             v
+                    device row + cookie --> their own trains
+```
+
+**Redemption is POST-only, behind a tap.** Chat apps fetch shared links to
+build previews; if opening the URL redeemed it, WhatsApp would spend the
+invite before the recipient ever saw it. Preview bots do not POST. Verified:
+fetching `/i/<code>` leaves `used_at` null.
+
+Codes are 12 characters from an alphabet with no `I`/`1`/`O`/`0` (~60 bits),
+stored hashed, single use, expiring after `INVITE_TTL_DAYS`. They are
+accepted lower-case and without dashes, because the code doubles as the way
+in on iOS -- see below. Redemption is globally rate limited, since every
+request arrives from Caddy on loopback and per-IP limiting would be
+meaningless.
+
+Admin has **no password**: `/api/admin/*` exists only on the tailnet-only
+Caddy site, which injects `X-Admin: 1`. The public site refuses those paths
+outright *and* strips the header, so either control alone suffices. Manage it
+with `./admin.sh`.
+
+An unregistered device gets 401 from every endpoint except `/api/health`,
+which exposes no user data and is left open for monitoring.
+
+### iOS
+
+Safari and an installed PWA have **separate storage**, so a code redeemed in
+Safari does not register the installed app -- and iOS only delivers push to
+the installed app. Recipients should add the page to the Home Screen first,
+open it from there, and type the code. That is why the invite is a typeable
+code and not only a link.
+
 ## Layout
 
 ```
 backend/
+  db.py       sqlite connection handling
+  accounts.py devices, invites, cookie tokens
   iris.py     live-map parser (positions, delays, nearest station)
   route.py    itinerary parser: branches, stops, day rollover, delays
   trips.py    SQLite store + event detection + watcher loop
@@ -126,6 +174,9 @@ an open panel back to a loading message.
 ```sh
 ./deploy.sh          # web assets only
 ./deploy.sh --api    # also rebuild the image and restart the unit
+./admin.sh invite X  # mint an invite (tailnet only)
+./admin.sh devices   # who is registered, and what they are watching
+./admin.sh revoke N  # lock a device out immediately
 ```
 
 Assets are stamped with a content hash so the service worker and the
@@ -140,8 +191,16 @@ Assets are stamped with a content hash so the service worker and the
 - **Overnight trains** wrap past midnight; day offsets are inferred from times
   moving backwards, tracked per arrival/departure rather than per station
   (a train can arrive 23:51 and depart 00:02).
-- **A push endpoint is a bearer capability.** Anyone holding one can list or
-  delete its trips; there is no other authentication and no rate limiting.
+- **An invite link is a bearer token.** Whoever opens it first is registered.
+  Forwarded in a group chat, it is gone -- single use, expiry and revocation
+  limit the damage but do not prevent it. `./admin.sh devices` shows
+  last-seen times so a stranger is visible.
+- **Losing the cookie means losing access.** Cleared site data, a different
+  browser, or private browsing all need a fresh invite. Storage for a
+  *non-installed* site on iOS is evicted after 7 days idle, which is another
+  reason to install to the Home Screen.
+- The Funnel URL is public regardless; the gate is application-level, so an
+  unregistered visitor can load the shell but can do nothing with it.
 - **iOS** only exposes Web Push to PWAs installed to the Home Screen.
 - Delays are reported by station staff, so they are as accurate — and as
   granular — as those reports.

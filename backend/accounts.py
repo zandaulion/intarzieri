@@ -1,0 +1,270 @@
+"""Devices and invites.
+
+There are no usernames or passwords. A device proves who it is with a random
+token held in an HttpOnly cookie, issued when an invite is redeemed. One
+invite registers exactly one device, which is what makes "two phones = two
+invites" fall out naturally.
+
+Tokens are stored hashed: a leaked database should not hand over working
+credentials.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import os
+import secrets
+import time
+from datetime import datetime, timedelta, timezone
+
+from db import connect
+
+log = logging.getLogger("trains.accounts")
+
+COOKIE_NAME = "tw_device"
+# Browsers clamp cookie lifetime to 400 days; asking for more is pointless.
+COOKIE_MAX_AGE = 400 * 24 * 3600
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() != "false"
+INVITE_TTL = timedelta(days=int(os.getenv("INVITE_TTL_DAYS", "7")))
+
+# Unambiguous alphabet: no I/1, no O/0, so a code can be read aloud or typed
+# from a phone screen without confusion. 12 chars = ~60 bits.
+_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_GROUPS = 3
+_GROUP_LEN = 4
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS devices (
+    id         INTEGER PRIMARY KEY,
+    token_hash TEXT UNIQUE NOT NULL,
+    label      TEXT,
+    created_at TEXT NOT NULL,
+    last_seen  TEXT,
+    revoked    INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS invites (
+    id         INTEGER PRIMARY KEY,
+    code_hash  TEXT UNIQUE NOT NULL,
+    label      TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,
+    device_id  INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+    -- When set before redemption, the invite binds an existing device rather
+    -- than creating one. Used to hand an already-registered device back to
+    -- its owner after the migration to cookie identity.
+    adopt_id   INTEGER REFERENCES devices(id) ON DELETE CASCADE
+);
+"""
+
+
+def init_schema(con) -> None:
+    con.executescript(SCHEMA)
+
+
+# --------------------------------------------------------------------------
+# tokens
+# --------------------------------------------------------------------------
+def new_device_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def new_invite_code() -> str:
+    return "-".join(
+        "".join(secrets.choice(_ALPHABET) for _ in range(_GROUP_LEN))
+        for _ in range(_GROUPS)
+    )
+
+
+def normalise_code(raw: str) -> str:
+    """Accept what a human types: lower case, missing or extra dashes."""
+    cleaned = "".join(c for c in (raw or "").upper() if c in _ALPHABET)
+    if len(cleaned) != _GROUPS * _GROUP_LEN:
+        return ""
+    return "-".join(
+        cleaned[i : i + _GROUP_LEN] for i in range(0, len(cleaned), _GROUP_LEN)
+    )
+
+
+def _hash(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# --------------------------------------------------------------------------
+# redemption throttle
+# --------------------------------------------------------------------------
+# Every request arrives from Caddy on loopback, so per-IP limiting is
+# meaningless here. A global ceiling still makes guessing hopeless.
+_REDEEM_WINDOW = 60.0
+_REDEEM_MAX = int(os.getenv("REDEEM_MAX_PER_MIN", "20"))
+_attempts: list[float] = []
+
+
+def throttled() -> bool:
+    now = time.monotonic()
+    _attempts[:] = [t for t in _attempts if now - t < _REDEEM_WINDOW]
+    if len(_attempts) >= _REDEEM_MAX:
+        return True
+    _attempts.append(now)
+    return False
+
+
+# --------------------------------------------------------------------------
+# devices
+# --------------------------------------------------------------------------
+def _device_by_token_blocking(token: str) -> dict | None:
+    with connect() as con:
+        row = con.execute(
+            "SELECT * FROM devices WHERE token_hash = ? AND revoked = 0",
+            (_hash(token),),
+        ).fetchone()
+        if not row:
+            return None
+        con.execute("UPDATE devices SET last_seen = ? WHERE id = ?", (_now(), row["id"]))
+        return dict(row)
+
+
+async def device_by_token(token: str) -> dict | None:
+    return await asyncio.to_thread(_device_by_token_blocking, token)
+
+
+def _list_devices_blocking() -> list[dict]:
+    with connect() as con:
+        return [
+            dict(r)
+            for r in con.execute(
+                """SELECT d.id, d.label, d.created_at, d.last_seen, d.revoked,
+                          (SELECT COUNT(*) FROM trips t
+                            WHERE t.device_id = d.id AND t.active = 1) AS active_trips,
+                          (SELECT COUNT(*) FROM push_subs p
+                            WHERE p.device_id = d.id) AS has_push
+                     FROM devices d ORDER BY d.id"""
+            )
+        ]
+
+
+async def list_devices() -> list[dict]:
+    return await asyncio.to_thread(_list_devices_blocking)
+
+
+def _set_revoked_blocking(device_id: int, revoked: bool) -> bool:
+    with connect() as con:
+        cur = con.execute(
+            "UPDATE devices SET revoked = ? WHERE id = ?", (1 if revoked else 0, device_id)
+        )
+        return cur.rowcount > 0
+
+
+async def set_revoked(device_id: int, revoked: bool) -> bool:
+    return await asyncio.to_thread(_set_revoked_blocking, device_id, revoked)
+
+
+def _rename_blocking(device_id: int, label: str) -> bool:
+    with connect() as con:
+        cur = con.execute(
+            "UPDATE devices SET label = ? WHERE id = ?", (label, device_id)
+        )
+        return cur.rowcount > 0
+
+
+async def rename_device(device_id: int, label: str) -> bool:
+    return await asyncio.to_thread(_rename_blocking, device_id, label)
+
+
+# --------------------------------------------------------------------------
+# invites
+# --------------------------------------------------------------------------
+def _create_invite_blocking(label: str | None, adopt_id: int | None) -> str:
+    code = new_invite_code()
+    with connect() as con:
+        con.execute(
+            """INSERT INTO invites (code_hash, label, created_at, expires_at, adopt_id)
+               VALUES (?,?,?,?,?)""",
+            (
+                _hash(code),
+                label,
+                _now(),
+                (datetime.now(timezone.utc) + INVITE_TTL).isoformat(timespec="seconds"),
+                adopt_id,
+            ),
+        )
+    return code
+
+
+async def create_invite(label: str | None = None, adopt_id: int | None = None) -> str:
+    return await asyncio.to_thread(_create_invite_blocking, label, adopt_id)
+
+
+def _list_invites_blocking() -> list[dict]:
+    with connect() as con:
+        return [
+            dict(r)
+            for r in con.execute(
+                """SELECT id, label, created_at, expires_at, used_at, device_id, adopt_id
+                     FROM invites ORDER BY id DESC"""
+            )
+        ]
+
+
+async def list_invites() -> list[dict]:
+    return await asyncio.to_thread(_list_invites_blocking)
+
+
+def _revoke_invite_blocking(invite_id: int) -> bool:
+    with connect() as con:
+        cur = con.execute(
+            "DELETE FROM invites WHERE id = ? AND used_at IS NULL", (invite_id,)
+        )
+        return cur.rowcount > 0
+
+
+async def revoke_invite(invite_id: int) -> bool:
+    return await asyncio.to_thread(_revoke_invite_blocking, invite_id)
+
+
+class InviteError(Exception):
+    """Redemption refused. The message is safe to show the user."""
+
+
+def _redeem_blocking(code: str) -> tuple[int, str]:
+    """-> (device_id, device_token). Single-use, enforced under a write lock."""
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT * FROM invites WHERE code_hash = ?", (_hash(code),)
+        ).fetchone()
+        if not row:
+            raise InviteError("That invite code is not valid.")
+        if row["used_at"]:
+            raise InviteError("That invite has already been used.")
+        if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+            raise InviteError("That invite has expired. Ask for a new one.")
+
+        token = new_device_token()
+        if row["adopt_id"]:
+            device_id = row["adopt_id"]
+            con.execute(
+                "UPDATE devices SET token_hash = ?, revoked = 0 WHERE id = ?",
+                (_hash(token), device_id),
+            )
+        else:
+            cur = con.execute(
+                "INSERT INTO devices (token_hash, label, created_at) VALUES (?,?,?)",
+                (_hash(token), row["label"], _now()),
+            )
+            device_id = cur.lastrowid
+
+        con.execute(
+            "UPDATE invites SET used_at = ?, device_id = ? WHERE id = ?",
+            (_now(), device_id, row["id"]),
+        )
+        return device_id, token
+
+
+async def redeem(code: str) -> tuple[int, str]:
+    return await asyncio.to_thread(_redeem_blocking, code)

@@ -10,18 +10,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sqlite3
-from contextlib import contextmanager
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-
+import accounts
 import route as R
+from db import columns, connect
 
 log = logging.getLogger("trains.trips")
-
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
-DB_PATH = DATA_DIR / "trips.db"
 
 # How much the delay must move before it is worth waking somebody's phone.
 DELAY_THRESHOLD = int(os.getenv("DELAY_THRESHOLD", "5"))
@@ -47,6 +42,7 @@ MAX_ACTIVE = int(os.getenv("MAX_ACTIVE_TRIPS", "5"))
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS push_subs (
     id         INTEGER PRIMARY KEY,
+    device_id  INTEGER UNIQUE REFERENCES devices(id) ON DELETE CASCADE,
     endpoint   TEXT UNIQUE NOT NULL,
     p256dh     TEXT NOT NULL,
     auth       TEXT NOT NULL,
@@ -54,7 +50,7 @@ CREATE TABLE IF NOT EXISTS push_subs (
 );
 CREATE TABLE IF NOT EXISTS trips (
     id          INTEGER PRIMARY KEY,
-    sub_id      INTEGER NOT NULL REFERENCES push_subs(id) ON DELETE CASCADE,
+    device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     number      TEXT NOT NULL,
     run_date    TEXT NOT NULL,          -- YYYY-MM-DD, the route's start date
     from_slug   TEXT NOT NULL,
@@ -73,55 +69,132 @@ CREATE TABLE IF NOT EXISTS trips (
     dep_planned TEXT,
     arr_planned TEXT
 );
+"""
+
+# Kept apart from the table definitions: an index on device_id cannot be
+# created until the migration below has actually added that column to a
+# pre-existing trips table.
+INDEXES = """
 CREATE INDEX IF NOT EXISTS trips_active ON trips(active, number, run_date);
+CREATE INDEX IF NOT EXISTS trips_device ON trips(device_id);
+-- ON CONFLICT(device_id) needs a unique index to target. A migrated database
+-- got device_id via ALTER TABLE, which carries no constraint, so the index
+-- has to be created explicitly rather than relying on the column definition.
+CREATE UNIQUE INDEX IF NOT EXISTS push_subs_device ON push_subs(device_id);
 """
 
 
-@contextmanager
-def _connect():
-    """`with sqlite3.connect(...)` commits but does *not* close, so the
-    connection is closed explicitly here. WAL is set once in init(), not per
-    connection -- switching journal mode takes a lock every time.
-    """
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH, timeout=10)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield con
-        con.commit()
-    finally:
-        con.close()
-
-
-def init() -> None:
-    with _connect() as con:
+def init() -> list[int]:
+    with connect() as con:
         con.execute("PRAGMA journal_mode = WAL")
+        # devices must exist first: push_subs and trips reference it.
+        accounts.init_schema(con)
         con.executescript(SCHEMA)
-        # Additive migrations for databases created by an earlier version.
-        have = {r["name"] for r in con.execute("PRAGMA table_info(trips)")}
         for col, decl in (("branch_code", "TEXT"),):
-            if col not in have:
+            if col not in columns(con, "trips"):
                 con.execute(f"ALTER TABLE trips ADD COLUMN {col} {decl}")
                 log.info("migrated trips: added %s", col)
+    adopted = _migrate_to_devices()
+    with connect() as con:
+        con.executescript(INDEXES)
+    return adopted
+
+
+def _migrate_to_devices() -> list[int]:
+    """Move identity from the push endpoint onto a device row.
+
+    Before this, a trip belonged to a push subscription -- so a browser
+    rotating its endpoint silently orphaned every trip. Existing rows are
+    adopted by freshly minted devices; the returned ids get an adoption
+    invite so their owners keep what they were watching.
+    """
+    adopted: list[int] = []
+    with connect() as con:
+        con.execute("PRAGMA foreign_keys = OFF")
+
+        if "device_id" not in columns(con, "push_subs"):
+            con.execute("ALTER TABLE push_subs ADD COLUMN device_id INTEGER")
+            log.info("migrated push_subs: added device_id")
+
+        orphans = con.execute(
+            "SELECT id FROM push_subs WHERE device_id IS NULL"
+        ).fetchall()
+        for row in orphans:
+            token = accounts.new_device_token()
+            cur = con.execute(
+                "INSERT INTO devices (token_hash, label, created_at) VALUES (?,?,?)",
+                (accounts._hash(token), "migrated", accounts._now()),
+            )
+            con.execute(
+                "UPDATE push_subs SET device_id = ? WHERE id = ?", (cur.lastrowid, row["id"])
+            )
+            adopted.append(cur.lastrowid)
+            log.info("migrated push_sub %s onto device %s", row["id"], cur.lastrowid)
+
+        if "device_id" not in columns(con, "trips"):
+            # SQLite cannot retype a column in place, so the table is rebuilt.
+            log.info("rebuilding trips around device_id")
+            con.execute("ALTER TABLE trips RENAME TO trips_old")
+            con.executescript(SCHEMA)  # tables only; indexes follow in init()
+            con.execute(
+                """INSERT INTO trips (id, device_id, number, run_date, from_slug,
+                        from_name, to_slug, to_name, created_at, active, departed,
+                        arrived, last_delay, last_event, dep_planned, arr_planned,
+                        branch_code)
+                   SELECT o.id,
+                          COALESCE(p.device_id, (SELECT MIN(id) FROM devices)),
+                          o.number, o.run_date, o.from_slug, o.from_name,
+                          o.to_slug, o.to_name, o.created_at, o.active, o.departed,
+                          o.arrived, o.last_delay, o.last_event, o.dep_planned,
+                          o.arr_planned, o.branch_code
+                     FROM trips_old o LEFT JOIN push_subs p ON p.id = o.sub_id"""
+            )
+            moved = con.execute("SELECT COUNT(*) FROM trips").fetchone()[0]
+            con.execute("DROP TABLE trips_old")
+            log.info("rebuilt trips: %d row(s) carried over", moved)
+
+        con.execute("PRAGMA foreign_keys = ON")
+    return adopted
 
 
 # --------------------------------------------------------------------------
 # storage
 # --------------------------------------------------------------------------
-def _upsert_sub(con: sqlite3.Connection, sub: dict) -> int:
+def _upsert_sub(con, device_id: int, sub: dict) -> int:
+    """One push subscription per device, replaced when the browser rotates it.
+
+    Keyed on device_id rather than endpoint precisely so a rotation updates
+    the row instead of stranding the device's trips behind a dead endpoint.
+    """
     keys = sub.get("keys") or {}
     endpoint = sub["endpoint"]
     now = datetime.now().isoformat(timespec="seconds")
+    # The same endpoint could previously have belonged to another device row.
     con.execute(
-        """INSERT INTO push_subs (endpoint, p256dh, auth, created_at)
-           VALUES (?,?,?,?)
-           ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh,
-                                               auth=excluded.auth""",
-        (endpoint, keys.get("p256dh", ""), keys.get("auth", ""), now),
+        "DELETE FROM push_subs WHERE endpoint = ? AND device_id IS NOT ?",
+        (endpoint, device_id),
     )
-    row = con.execute("SELECT id FROM push_subs WHERE endpoint=?", (endpoint,)).fetchone()
+    con.execute(
+        """INSERT INTO push_subs (device_id, endpoint, p256dh, auth, created_at)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(device_id) DO UPDATE SET endpoint=excluded.endpoint,
+                                                p256dh=excluded.p256dh,
+                                                auth=excluded.auth""",
+        (device_id, endpoint, keys.get("p256dh", ""), keys.get("auth", ""), now),
+    )
+    row = con.execute(
+        "SELECT id FROM push_subs WHERE device_id = ?", (device_id,)
+    ).fetchone()
     return row["id"]
+
+
+def _save_sub_blocking(device_id: int, sub: dict) -> None:
+    with connect() as con:
+        _upsert_sub(con, device_id, sub)
+
+
+async def save_subscription(device_id: int, sub: dict) -> None:
+    await asyncio.to_thread(_save_sub_blocking, device_id, sub)
 
 
 class TripLimitReached(Exception):
@@ -130,38 +203,37 @@ class TripLimitReached(Exception):
         self.limit = limit
 
 
-def _count_active_blocking(endpoint: str) -> int:
-    with _connect() as con:
-        row = con.execute(
-            """SELECT COUNT(*) FROM trips t JOIN push_subs s ON s.id = t.sub_id
-               WHERE s.endpoint = ? AND t.active = 1""",
-            (endpoint,),
-        ).fetchone()
-        return row[0]
+def _count_active_blocking(device_id: int) -> int:
+    with connect() as con:
+        return con.execute(
+            "SELECT COUNT(*) FROM trips WHERE device_id = ? AND active = 1",
+            (device_id,),
+        ).fetchone()[0]
 
 
-async def count_active(endpoint: str) -> int:
-    return await asyncio.to_thread(_count_active_blocking, endpoint)
+async def count_active(device_id: int) -> int:
+    return await asyncio.to_thread(_count_active_blocking, device_id)
 
 
-def _add_trip_blocking(sub: dict, trip: dict) -> int:
-    with _connect() as con:
+def _add_trip_blocking(device_id: int, sub: dict, trip: dict) -> int:
+    with connect() as con:
         # Take the write lock before counting, so two requests arriving
         # together cannot both see a free slot and both take it.
         con.execute("BEGIN IMMEDIATE")
-        sub_id = _upsert_sub(con, sub)
+        if sub:
+            _upsert_sub(con, device_id, sub)
         active = con.execute(
-            "SELECT COUNT(*) FROM trips WHERE sub_id = ? AND active = 1", (sub_id,)
+            "SELECT COUNT(*) FROM trips WHERE device_id = ? AND active = 1", (device_id,)
         ).fetchone()[0]
         if active >= MAX_ACTIVE:
             raise TripLimitReached(MAX_ACTIVE)
         cur = con.execute(
-            """INSERT INTO trips (sub_id, number, run_date, from_slug, from_name,
+            """INSERT INTO trips (device_id, number, run_date, from_slug, from_name,
                                   to_slug, to_name, created_at,
                                   dep_planned, arr_planned, branch_code)
                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                sub_id,
+                device_id,
                 trip["number"],
                 trip["run_date"],
                 trip["from_slug"],
@@ -177,8 +249,8 @@ def _add_trip_blocking(sub: dict, trip: dict) -> int:
         return cur.lastrowid
 
 
-async def add_trip(sub: dict, trip: dict) -> int:
-    return await asyncio.to_thread(_add_trip_blocking, sub, trip)
+async def add_trip(device_id: int, sub: dict, trip: dict) -> int:
+    return await asyncio.to_thread(_add_trip_blocking, device_id, sub, trip)
 
 
 def _finished_at(trip: dict) -> datetime | None:
@@ -186,14 +258,13 @@ def _finished_at(trip: dict) -> datetime | None:
     return _iso(trip.get("last_event")) or _iso(trip.get("arr_planned"))
 
 
-def _list_trips_blocking(endpoint: str) -> list[dict]:
-    with _connect() as con:
+def _list_trips_blocking(device_id: int) -> list[dict]:
+    with connect() as con:
         rows = [
             dict(r)
             for r in con.execute(
-                """SELECT t.* FROM trips t JOIN push_subs s ON s.id = t.sub_id
-                   WHERE s.endpoint = ? ORDER BY t.id DESC""",
-                (endpoint,),
+                "SELECT * FROM trips WHERE device_id = ? ORDER BY id DESC",
+                (device_id,),
             )
         ]
     # Filtered here rather than in SQL: arr_planned is an ISO string whose UTC
@@ -210,29 +281,29 @@ def _list_trips_blocking(endpoint: str) -> list[dict]:
     return kept
 
 
-async def list_trips(endpoint: str) -> list[dict]:
-    return await asyncio.to_thread(_list_trips_blocking, endpoint)
+async def list_trips(device_id: int) -> list[dict]:
+    return await asyncio.to_thread(_list_trips_blocking, device_id)
 
 
-def _delete_trip_blocking(trip_id: int, endpoint: str) -> bool:
-    with _connect() as con:
+def _delete_trip_blocking(trip_id: int, device_id: int) -> bool:
+    with connect() as con:
         cur = con.execute(
-            """DELETE FROM trips WHERE id = ? AND sub_id =
-               (SELECT id FROM push_subs WHERE endpoint = ?)""",
-            (trip_id, endpoint),
+            "DELETE FROM trips WHERE id = ? AND device_id = ?", (trip_id, device_id)
         )
         return cur.rowcount > 0
 
 
-async def delete_trip(trip_id: int, endpoint: str) -> bool:
-    return await asyncio.to_thread(_delete_trip_blocking, trip_id, endpoint)
+async def delete_trip(trip_id: int, device_id: int) -> bool:
+    return await asyncio.to_thread(_delete_trip_blocking, trip_id, device_id)
 
 
 def _active_blocking() -> list[dict]:
-    with _connect() as con:
+    with connect() as con:
         rows = con.execute(
             """SELECT t.*, s.endpoint, s.p256dh, s.auth
-               FROM trips t JOIN push_subs s ON s.id = t.sub_id
+               FROM trips t
+               JOIN devices d ON d.id = t.device_id AND d.revoked = 0
+               JOIN push_subs s ON s.device_id = t.device_id
                WHERE t.active = 1"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -242,14 +313,14 @@ def _update_blocking(trip_id: int, fields: dict) -> None:
     if not fields:
         return
     sets = ", ".join(f"{k} = ?" for k in fields)
-    with _connect() as con:
+    with connect() as con:
         con.execute(
             f"UPDATE trips SET {sets} WHERE id = ?", (*fields.values(), trip_id)
         )
 
 
 def _drop_sub_blocking(endpoint: str) -> None:
-    with _connect() as con:
+    with connect() as con:
         con.execute("DELETE FROM push_subs WHERE endpoint = ?", (endpoint,))
 
 
@@ -426,10 +497,11 @@ async def _dispatch(trip: dict, events: list[dict]) -> None:
 
 
 def _get_trip_blocking(trip_id: int) -> dict | None:
-    with _connect() as con:
+    with connect() as con:
         row = con.execute(
             """SELECT t.*, s.endpoint, s.p256dh, s.auth
-               FROM trips t JOIN push_subs s ON s.id = t.sub_id
+               FROM trips t
+               LEFT JOIN push_subs s ON s.device_id = t.device_id
                WHERE t.id = ?""",
             (trip_id,),
         ).fetchone()
@@ -457,7 +529,7 @@ def _purge_blocking() -> int:
     """Drop trips that finished long ago. Only retired trips are considered,
     so an overdue train still being watched is never removed."""
     now = datetime.now(R.RO)
-    with _connect() as con:
+    with connect() as con:
         rows = [
             dict(r)
             for r in con.execute(

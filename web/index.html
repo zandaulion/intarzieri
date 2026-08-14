@@ -24,6 +24,36 @@
     </div>
   </header>
 
+  <!-- gate ---------------------------------------------------------------->
+  <section id="gate" hidden>
+    <div class="card">
+      <h2 id="gate-title">Invite required</h2>
+      <p class="gate-lead" id="gate-lead">
+        This app is invite-only. If someone shared a link or a code with you,
+        enter it below to register this device.
+      </p>
+      <form class="search" id="form-code">
+        <input id="invite-code" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" placeholder="ABCD-EFGH-JKLM"
+               aria-label="Invite code" required>
+        <button class="btn" type="submit" id="btn-activate">Activate</button>
+      </form>
+      <p class="err" id="gate-err" hidden></p>
+      <p class="hint">
+        Each invite registers one device. Another phone or laptop needs its
+        own invite.
+      </p>
+      <p class="hint">
+        <strong>On iPhone:</strong> add this page to your Home Screen first
+        (Share → Add to Home Screen), then open it from there and enter the
+        code. Notifications only work from the installed app, and the
+        installed app has its own separate storage.
+      </p>
+    </div>
+  </section>
+
+  <div id="app" hidden>
+
   <!-- step 1 -------------------------------------------------------------->
   <section class="step" id="step-train">
     <h2><span class="stepno">1</span> Which train?</h2>
@@ -74,6 +104,8 @@
     </div>
     <div class="list" id="trip-list"></div>
   </section>
+
+  </div><!-- /#app -->
 
   <p class="foot">
     Live data from <a href="https://mersultrenurilor.infofer.ro/">Mersul trenurilor CFR</a>.
