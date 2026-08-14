@@ -143,6 +143,8 @@ function renderDevices(devices) {
       <button class="btn small ghost" data-revoke="${d.id}" data-to="${d.revoked ? 0 : 1}">
         ${d.revoked ? 'Restaurează' : 'Revocă'}
       </button>
+      <button class="btn small danger" data-forget="${d.id}"
+              data-trips="${d.active_trips}">Șterge</button>
     </div>`).join('');
 
   $('devices').querySelectorAll('[data-revoke]').forEach((b) =>
@@ -152,6 +154,18 @@ function renderDevices(devices) {
       if (on && !confirm('Revoci acest dispozitiv? Pierde accesul imediat și '
                        + 'nu mai primește notificări.')) return;
       await api(`/api/admin/devices/${b.dataset.revoke}/revoke`, { revoked: on });
+      load();
+    }));
+
+  $('devices').querySelectorAll('[data-forget]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const n = Number(b.dataset.trips);
+      // Deleting cascades to the device's trips and push subscription, so the
+      // count is worth stating rather than discovering afterwards.
+      const extra = n ? ` Cele ${n} curse urmărite se pierd.` : '';
+      if (!confirm(`Ștergi definitiv acest dispozitiv?${extra} `
+                 + 'Va avea nevoie de o invitație nouă.')) return;
+      await api(`/api/admin/devices/${b.dataset.forget}`, null, 'DELETE');
       load();
     }));
 
@@ -210,6 +224,13 @@ function renderInvites(invites) {
       load();
     }));
 }
+
+$('prune-devices').addEventListener('click', async () => {
+  if (!confirm('Ștergi toate dispozitivele revocate? Cursele lor se pierd.')) return;
+  const r = await api('/api/admin/devices/prune', {});
+  await load();
+  alert(`Am șters ${r.deleted} ${r.deleted === 1 ? 'dispozitiv' : 'dispozitive'}.`);
+});
 
 $('prune').addEventListener('click', async () => {
   if (!confirm('Ștergi toate invitațiile folosite și expirate? Cele în așteptare rămân.')) return;

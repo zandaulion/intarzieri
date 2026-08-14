@@ -21,6 +21,8 @@ usage: ./admin.sh <command>
   prune                 delete every used and expired invite
   devices               list registered devices
   revoke <id>           lock a device out
+  forget <id>           delete a device (its trips go too)
+  prune-devices         delete every revoked device
   unrevoke <id>         let it back in
   name <id> <label>     label a device
 
@@ -39,6 +41,8 @@ case "${1:-}" in
   unvite)   post "/api/admin/invites/${2:?id}/revoke" | j ;;
   devices)  get /api/admin/devices | python3 "$ROOT/bin/fmt_devices.py" ;;
   revoke)   post "/api/admin/devices/${2:?id}/revoke" '{"revoked":true}' | j ;;
+  forget)   curl -fsS --max-time 15 -X DELETE "$API/api/admin/devices/${2:?id}" | j ;;
+  prune-devices) post /api/admin/devices/prune | j ;;
   unrevoke) post "/api/admin/devices/${2:?id}/revoke" '{"revoked":false}' | j ;;
   name)     post "/api/admin/devices/${2:?id}/label" "{\"label\":\"${3:?label}\"}" | j ;;
   *) usage; exit 1 ;;

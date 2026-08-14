@@ -97,6 +97,15 @@ def init() -> list[int]:
     adopted = _migrate_to_devices()
     with connect() as con:
         con.executescript(INDEXES)
+        # push_subs.device_id came from an ALTER TABLE, which in SQLite cannot
+        # carry ON DELETE CASCADE, so rows can outlive their device. Sweep any
+        # that already have.
+        orphans = con.execute(
+            "DELETE FROM push_subs WHERE device_id IS NOT NULL AND device_id "
+            "NOT IN (SELECT id FROM devices)"
+        ).rowcount
+        if orphans:
+            log.info("removed %d push subscription(s) with no device", orphans)
     return adopted
 
 

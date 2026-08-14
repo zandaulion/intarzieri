@@ -192,6 +192,38 @@ async def rename_device(device_id: int, label: str) -> bool:
     return await asyncio.to_thread(_rename_blocking, device_id, label)
 
 
+def _delete_device_blocking(device_id: int) -> bool:
+    """Removing a device takes its trips and push subscription with it.
+
+    trips cascades for real -- that table was rebuilt during the migration, so
+    it carries the foreign key. push_subs did not: its device_id arrived via
+    ALTER TABLE, and SQLite cannot attach a constraint that way, so on a
+    migrated database there is no cascade to rely on. Deleted explicitly.
+    """
+    with connect() as con:
+        con.execute("DELETE FROM push_subs WHERE device_id = ?", (device_id,))
+        cur = con.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+        return cur.rowcount > 0
+
+
+async def delete_device(device_id: int) -> bool:
+    return await asyncio.to_thread(_delete_device_blocking, device_id)
+
+
+def _prune_devices_blocking() -> int:
+    with connect() as con:
+        con.execute(
+            "DELETE FROM push_subs WHERE device_id IN "
+            "(SELECT id FROM devices WHERE revoked = 1)"
+        )
+        cur = con.execute("DELETE FROM devices WHERE revoked = 1")
+        return cur.rowcount
+
+
+async def prune_devices() -> int:
+    return await asyncio.to_thread(_prune_devices_blocking)
+
+
 # --------------------------------------------------------------------------
 # invites
 # --------------------------------------------------------------------------

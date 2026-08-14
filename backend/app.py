@@ -591,6 +591,19 @@ async def admin_label_device(device_id: int, payload: dict = Body(...)):
     return {"id": device_id, "label": label}
 
 
+@app.delete("/api/admin/devices/{device_id}", dependencies=[Depends(admin_only)])
+async def admin_delete_device(device_id: int):
+    """Deletes the device and, by cascade, its trips and push subscription."""
+    if not await accounts.delete_device(device_id):
+        raise HTTPException(404, "no such device")
+    return {"deleted": device_id}
+
+
+@app.post("/api/admin/devices/prune", dependencies=[Depends(admin_only)])
+async def admin_prune_devices():
+    return {"deleted": await accounts.prune_devices()}
+
+
 @app.get("/api/admin/invites", dependencies=[Depends(admin_only)])
 async def admin_invites():
     base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")

@@ -201,6 +201,8 @@ an open panel back to a loading message.
 ./admin.sh prune     # delete used and expired invites
 ./admin.sh devices   # who is registered, and what they are watching
 ./admin.sh revoke N  # lock a device out immediately
+./admin.sh forget N  # delete a device outright (its trips go too)
+./admin.sh prune-devices
 ```
 
 Assets are stamped with a content hash so the service worker and the
@@ -215,6 +217,13 @@ Assets are stamped with a content hash so the service worker and the
 - **Overnight trains** wrap past midnight; day offsets are inferred from times
   moving backwards, tracked per arrival/departure rather than per station
   (a train can arrive 23:51 and depart 00:02).
+- **SQLite cannot add a foreign key with `ALTER TABLE`.** `push_subs.device_id`
+  arrived that way during the migration, so on a migrated database it has no
+  `ON DELETE CASCADE` and `PRAGMA foreign_key_check` reports clean because
+  there is no constraint to check. Deleting a device removes its push
+  subscription explicitly rather than trusting the cascade; `trips` was
+  rebuilt during the migration so it does carry the key. The same limitation
+  is why `ON CONFLICT(device_id)` needs its unique index created by hand.
 - **An invite link is a bearer token.** Whoever opens it first is registered.
   Forwarded in a group chat, it is gone -- single use, expiry and revocation
   limit the damage but do not prevent it. `./admin.sh devices` shows
