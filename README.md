@@ -136,6 +136,19 @@ Note the circuit breaker does **not** do this job. Its cooldown (60 s) is far
 shorter than the watch interval, so it has expired long before the next pass
 — it exists to keep interactive searches fast, not to pace the watcher.
 
+### Is it them or us?
+
+`bin/probe.sh` records CFR reachability as CSV, one line per run. The value
+is comparison: run it on two machines on different connections and see
+whether outages coincide. If both lose it at the same moment, CFR was down.
+If only one does, that network is being blocked — and the `tcp` column says
+whether the block sits below HTTP, where a User-Agent cannot be the cause.
+
+```sh
+OUT=~/cfr.csv LABEL=home ./bin/probe.sh            # one check
+OUT=~/cfr.csv ./bin/probe.sh summary               # what it has seen
+```
+
 ## Alerts
 
 `ops.py` publishes to [ntfy](https://ntfy.sh) on **state changes only** — one
