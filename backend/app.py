@@ -33,6 +33,13 @@ import trips
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
 WATCH_SECONDS = int(os.getenv("WATCH_SECONDS", "180"))
 ROUTE_TTL = int(os.getenv("ROUTE_TTL", "60"))
+# Someone waiting on a search will not sit through the background timeout.
+ROUTE_TIMEOUT = float(os.getenv("ROUTE_TIMEOUT", "12"))
+# After this many consecutive failures, stop trying for a while: when the
+# source is down every request otherwise costs a full timeout, and with two
+# candidate runs that is twice over.
+BREAKER_FAILS = int(os.getenv("BREAKER_FAILS", "3"))
+BREAKER_COOLDOWN = int(os.getenv("BREAKER_COOLDOWN", "60"))
 UPSTREAM_TIMEOUT = float(os.getenv("UPSTREAM_TIMEOUT", "45"))
 USER_AGENT = os.getenv(
     "USER_AGENT",
@@ -127,29 +134,78 @@ async def poll_once(client: httpx.AsyncClient) -> None:
     log.info("polled %d trains (%d bytes)", len(trains), len(r.content))
 
 
+class UpstreamDown(Exception):
+    """The source is not answering and we are not going to wait for it."""
+
+
 class RouteCache:
     """Short-lived cache in front of the itinerary endpoint.
 
     Each fetch is a GET (for the antiforgery token) plus a POST, and the token
     is bound to a cookie, so the two must not interleave -- hence the lock.
+
+    Also holds the circuit breaker. When CFR's network goes away entirely --
+    as it can, the whole 193.230.156.0/24 at once -- every lookup would
+    otherwise block for the full timeout before failing, and a search that
+    considers two candidate runs would do it twice.
     """
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._entries: dict[tuple[str, str], tuple[float, R.Route]] = {}
+        self.failures = 0
+        self._open_until = 0.0
 
-    async def get(self, client: httpx.AsyncClient, number: str, when: date) -> R.Route:
+    @property
+    def tripped(self) -> bool:
+        return asyncio.get_running_loop().time() < self._open_until
+
+    def _record(self, ok: bool) -> None:
+        if ok:
+            self.failures = 0
+            self._open_until = 0.0
+            return
+        self.failures += 1
+        if self.failures >= BREAKER_FAILS:
+            self._open_until = asyncio.get_running_loop().time() + BREAKER_COOLDOWN
+
+    async def get(
+        self, client: httpx.AsyncClient, number: str, when: date, timeout: float | None = None
+    ) -> R.Route:
         key = (number, when.isoformat())
-        hit = self._entries.get(key)
         now = asyncio.get_running_loop().time()
+        hit = self._entries.get(key)
         if hit and now - hit[0] < ROUTE_TTL:
             return hit[1]
+
+        # Source is known-down: hand back whatever we have rather than making
+        # the caller wait to be told the same thing.
+        if self.tripped:
+            if hit:
+                log.info("upstream down; serving stale route for %s", number)
+                return hit[1]
+            raise UpstreamDown()
+
         async with self._lock:
-            hit = self._entries.get(key)
             now = asyncio.get_running_loop().time()
+            hit = self._entries.get(key)
             if hit and now - hit[0] < ROUTE_TTL:
                 return hit[1]
-            rt = await R.fetch_route(client, number, when)
+            try:
+                rt = await asyncio.wait_for(
+                    R.fetch_route(client, number, when),
+                    timeout=timeout or ROUTE_TIMEOUT,
+                )
+            except (httpx.HTTPError, asyncio.TimeoutError):
+                self._record(False)
+                if hit:
+                    log.info("fetch failed; serving stale route for %s", number)
+                    return hit[1]
+                raise
+            except ValueError:
+                # A train that simply does not run is not an outage.
+                raise
+            self._record(True)
             self._entries[key] = (now, rt)
             if len(self._entries) > 200:
                 oldest = sorted(self._entries.items(), key=lambda kv: kv[1][0])[:50]
@@ -282,6 +338,8 @@ async def health():
         "ok": ok,
         "last_error": store.last_error,
         "last_watch": getattr(app.state, "last_watch", None),
+        "upstream_failures": routes.failures,
+        "upstream_down": routes.tripped,
         **_meta(),
     }
 
@@ -355,6 +413,8 @@ async def _pick_run(number: str, day: date) -> tuple[R.Route, list[dict]]:
     if not dep or now >= dep:
         return today_rt, []                      # already under way; no ambiguity
 
+    if routes.tripped:                           # source is down; do not wait twice
+        return today_rt, []
     prev = day - timedelta(days=1)
     try:
         prev_rt = await routes.get(client(), number, prev)
@@ -394,9 +454,13 @@ async def train_route(
             "Nu am găsit traseul acestui tren. "
             "Verifică numărul sau poate nu circulă în ziua aleasă.",
         )
-    except httpx.HTTPError as exc:
-        log.warning("upstream error for %s: %s", number, exc)
-        raise HTTPException(502, "Sursa de date nu răspunde. Încearcă din nou.")
+    except (UpstreamDown, asyncio.TimeoutError, httpx.HTTPError) as exc:
+        log.warning("upstream unavailable for %s: %r", number, exc)
+        raise HTTPException(
+            503,
+            "Mersul trenurilor nu răspunde momentan. "
+            "Nu este o problemă a acestui tren — încearcă din nou în câteva minute.",
+        )
 
     start = R.parse_ro_date(rt.date)
 
@@ -474,9 +538,12 @@ async def create_trip(
             "Nu am găsit traseul acestui tren. "
             "Verifică numărul sau poate nu circulă în ziua aleasă.",
         )
-    except httpx.HTTPError as exc:
-        log.warning("upstream error for %s: %s", number, exc)
-        raise HTTPException(502, "Sursa de date nu răspunde. Încearcă din nou.")
+    except (UpstreamDown, asyncio.TimeoutError, httpx.HTTPError) as exc:
+        log.warning("upstream unavailable for %s: %r", number, exc)
+        raise HTTPException(
+            503,
+            "Mersul trenurilor nu răspunde momentan. Încearcă din nou în câteva minute.",
+        )
 
     branch = rt.branch_for(from_slug, to_slug)
     if branch is None:

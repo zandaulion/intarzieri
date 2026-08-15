@@ -99,6 +99,16 @@ as one Romanian sentence, so the place only exists as prose:
 Note the last one: *mai devreme* means **early**, and the sign is carried by
 the words rather than a minus, so it has to be applied when parsing.
 
+### When the source goes away
+
+CFR's whole `193.230.156.0/24` can stop answering at once — not a 404, a TCP
+timeout on every host they run. Interactive lookups use a shorter timeout
+than the background watcher, and a circuit breaker opens after
+`BREAKER_FAILS` consecutive failures so subsequent searches fail in
+milliseconds instead of each paying the timeout again. A cached route is
+served in preference to an error even once expired, and `/api/health`
+exposes `upstream_down` so the cause is visible rather than guessed at.
+
 ## Load on the source
 
 - The live map is fetched **lazily** — only when a client asks and the cached
