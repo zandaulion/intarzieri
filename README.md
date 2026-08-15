@@ -111,12 +111,30 @@ exposes `upstream_down` so the cause is visible rather than guessed at.
 
 ## Load on the source
 
-- The live map is fetched **lazily** — only when a client asks and the cached
-  copy is older than `POLL_SECONDS`. An idle server makes no requests.
-- Itineraries are fetched only for trains somebody is watching, only inside
-  that train's journey window (`LEAD_MINUTES` before scheduled departure until
-  arrival + delay + `MAX_OVERDUE_HOURS`), and **grouped by train** — ten people
-  watching the same train cost one fetch, not ten.
+Itineraries are the only thing fetched. They are requested for trains
+somebody is watching, inside that train's journey window (`LEAD_MINUTES`
+before scheduled departure until arrival + delay + `MAX_OVERDUE_HOURS`), and
+**grouped by train** — ten people watching the same train cost one fetch, not
+ten. `WATCH_SECONDS` is 300: a delay that moves within five minutes is not
+worth a request.
+
+The live map endpoint was **removed**. It pulled 1.7 MB per call for data the
+itinerary carries more precisely, and nothing in the app consumed it. That
+also retired `iris.py` and the bundled 102 KB station list.
+
+## Alerts
+
+`ops.py` publishes to [ntfy](https://ntfy.sh) on **state changes only** — one
+message when the source stops answering, one when it comes back, and nothing
+in between. An alert channel that repeats itself gets muted, and a muted
+channel is worth nothing.
+
+Published as JSON rather than through ntfy's header API: HTTP headers are
+latin-1, so a title containing "Întârzieri" cannot be sent that way.
+
+Set `NTFY_TOPIC` in `site.env` to enable; leave it empty and alerts are off.
+On ntfy.sh the topic name *is* the credential — anyone who knows it can read
+and post — so use something unguessable.
 
 ## Access control
 

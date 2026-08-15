@@ -40,6 +40,7 @@ if [[ "${1:-}" == "--api" ]]; then
   podman build -t localhost/train-api:latest -f "$ROOT/backend/Containerfile" "$ROOT/backend"
   sed -e "s|@PUBLIC_BASE_URL@|${PUBLIC_BASE_URL}|g" \
       -e "s|@VAPID_SUBJECT@|${VAPID_SUBJECT}|g" \
+      -e "s|@NTFY_TOPIC@|${NTFY_TOPIC:-}|g" \
       "$ROOT/quadlet/train-api.container" \
       > "$HOME/.config/containers/systemd/train-api.container"
   systemctl --user daemon-reload

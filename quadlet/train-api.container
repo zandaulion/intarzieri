@@ -8,11 +8,10 @@ Image=localhost/train-api:latest
 ContainerName=train-api
 # Loopback only: reachable through Caddy, never directly from the network.
 PublishPort=127.0.0.1:8091:8000
-# Live-map snapshot is refreshed lazily, at most once per POLL_SECONDS, and
-# only when a client actually asks for it.
-Environment=POLL_SECONDS=120
 # How often watched trains are re-checked for departure/delay/arrival.
-Environment=WATCH_SECONDS=180
+# Deliberately unhurried: a delay that moves inside five minutes is not worth
+# a request, and this is the app's only load on the source.
+Environment=WATCH_SECONDS=300
 # Minimum change in minutes before a delay is worth a notification.
 Environment=DELAY_THRESHOLD=5
 Environment=VAPID_SUBJECT=@VAPID_SUBJECT@
@@ -24,6 +23,8 @@ Environment=INVITE_TTL_DAYS=7
 # device instead of being spent. Covers "tapped it in WhatsApp, then installed
 # the app properly" without leaving the link live for a week.
 Environment=INVITE_REBIND_MINUTES=60
+# Outage alerts. Substituted from site.env at deploy time.
+Environment=NTFY_TOPIC=@NTFY_TOPIC@
 # VAPID keypair + subscription database. Named volume so a rebuild of the
 # image never destroys existing push subscriptions.
 Volume=train-api-data:/data
