@@ -614,7 +614,7 @@ def _purge_blocking() -> int:
     return len(stale)
 
 
-async def watch_once(client) -> dict:
+async def watch_once(client, fetch=None) -> dict:
     """One pass over every active trip. Groups by train so N users watching
     the same train cost one upstream fetch, not N."""
     now = datetime.now(R.RO)
@@ -630,7 +630,10 @@ async def watch_once(client) -> dict:
     for (number, run_date), group in due.items():
         try:
             when = date.fromisoformat(run_date)
-            rt = await R.fetch_route(client, number, when)
+            # Shares the API's route cache when given one, so a train that a
+            # user just looked up is not fetched twice.
+            rt = await (fetch(number, when) if fetch
+                        else R.fetch_route(client, number, when))
         except Exception as exc:  # noqa: BLE001
             errors += 1
             log.warning("watch %s/%s failed: %s", number, run_date, exc)

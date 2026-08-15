@@ -115,12 +115,34 @@ Itineraries are the only thing fetched. They are requested for trains
 somebody is watching, inside that train's journey window (`LEAD_MINUTES`
 before scheduled departure until arrival + delay + `MAX_OVERDUE_HOURS`), and
 **grouped by train** — ten people watching the same train cost one fetch, not
-ten. `WATCH_SECONDS` is 300: a delay that moves within five minutes is not
+ten. The watcher shares the API's route cache, so a train somebody has just
+looked up is not fetched again on its account. `WATCH_SECONDS` is 300: a delay that moves within five minutes is not
 worth a request.
 
 The live map endpoint was **removed**. It pulled 1.7 MB per call for data the
 itinerary carries more precisely, and nothing in the app consumed it. That
 also retired `iris.py` and the bundled 102 KB station list.
+
+### Limiting what a user can cost
+
+The watcher is bounded by construction: trips are capped per device, grouped
+by train, and polled on a fixed interval. Interactive lookups are not — a
+device can ask for unboundedly many distinct train numbers, and each miss is
+a fetch. Two token buckets bound that:
+
+| | burst | refill |
+|---|---|---|
+| per device | 8 | 20/hour |
+| global | 30 | 150/hour |
+| trips added, per device | 10 | 15/hour |
+
+The budget is charged **only when a fetch actually happens** — a cache hit
+costs nothing, so re-opening the same train is free. Hitting the *global*
+ceiling refunds the device's token: it did nothing wrong, we ran out of our
+own allowance. Exceeding a limit returns 429 with `Retry-After`.
+
+One device exhausting its burst does not affect anyone else; verified by
+running four devices through normal sessions, then one of them rogue.
 
 ### Backing off
 

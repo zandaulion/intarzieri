@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY route.py trips.py push.py db.py accounts.py ops.py app.py ./
+COPY route.py trips.py push.py db.py accounts.py ops.py limits.py app.py ./
 
 # Run unprivileged inside the container as well as rootless outside it.
 RUN useradd --system --uid 10001 --no-create-home appuser \

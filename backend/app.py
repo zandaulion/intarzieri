@@ -21,6 +21,7 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Reques
 from fastapi.responses import ORJSONResponse
 
 import accounts
+import limits
 import ops
 import push
 import route as R
@@ -85,7 +86,12 @@ class RouteCache:
                 False, f"{self.failures} încercări eșuate la rând."))
 
     async def get(
-        self, client: httpx.AsyncClient, number: str, when: date, timeout: float | None = None
+        self,
+        client: httpx.AsyncClient,
+        number: str,
+        when: date,
+        timeout: float | None = None,
+        gate=None,
     ) -> R.Route:
         key = (number, when.isoformat())
         now = asyncio.get_running_loop().time()
@@ -106,6 +112,11 @@ class RouteCache:
             hit = self._entries.get(key)
             if hit and now - hit[0] < ROUTE_TTL:
                 return hit[1]
+            # Charged here and nowhere else: a cache hit costs nothing, and a
+            # request refused for budget must not also burn the caller's quota
+            # further down.
+            if gate is not None:
+                gate()
             try:
                 rt = await asyncio.wait_for(
                     R.fetch_route(client, number, when),
@@ -154,7 +165,10 @@ async def watcher() -> None:
     misses = 0
     while True:
         try:
-            result = await trips.watch_once(client())
+            result = await trips.watch_once(
+                client(),
+                fetch=lambda number, when: routes.get(client(), number, when),
+            )
             if result["polled"] or result["events_sent"]:
                 log.info("watch pass: %s", result)
             app.state.last_watch = result
@@ -257,6 +271,7 @@ async def health():
         "upstream_failures": routes.failures,
         "upstream_down": routes.tripped,
         "watch_seconds": WATCH_SECONDS,
+        **limits.snapshot(),
         "consecutive_misses": getattr(app.state, "consecutive_misses", 0),
         "next_pass_seconds": getattr(app.state, "next_pass_seconds", WATCH_SECONDS),
     }
@@ -285,7 +300,7 @@ def _edges(rt: R.Route) -> tuple[datetime | None, datetime | None]:
     return dep, arr
 
 
-async def _pick_run(number: str, day: date) -> tuple[R.Route, list[dict]]:
+async def _pick_run(number: str, day: date, gate=None) -> tuple[R.Route, list[dict]]:
     """Choose which day's run the user most likely means.
 
     An overnight train that left yesterday evening is still running this
@@ -294,7 +309,7 @@ async def _pick_run(number: str, day: date) -> tuple[R.Route, list[dict]]:
     one currently in motion -- so when today's run is still in the future,
     check whether yesterday's is out there and prefer it.
     """
-    today_rt = await routes.get(client(), number, day)
+    today_rt = await routes.get(client(), number, day, gate=gate)
     now = datetime.now(R.RO)
     runs = [{"date": day.isoformat(), "in_progress": False}]
 
@@ -306,7 +321,7 @@ async def _pick_run(number: str, day: date) -> tuple[R.Route, list[dict]]:
         return today_rt, []
     prev = day - timedelta(days=1)
     try:
-        prev_rt = await routes.get(client(), number, prev)
+        prev_rt = await routes.get(client(), number, prev, gate=gate)
     except Exception:                            # noqa: BLE001 - not every train ran
         return today_rt, []
 
@@ -330,12 +345,20 @@ async def train_route(
     except ValueError:
         raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
 
+    gate = lambda: limits.take_lookup(device["id"])  # noqa: E731
     runs: list[dict] = []
     try:
         if when:
-            rt = await routes.get(client(), number, day)
+            rt = await routes.get(client(), number, day, gate=gate)
         else:
-            rt, runs = await _pick_run(number, day)
+            rt, runs = await _pick_run(number, day, gate=gate)
+    except limits.RateLimited as exc:
+        raise HTTPException(
+            429,
+            "Prea multe căutări într-un timp scurt. "
+            f"Încearcă din nou în {exc.retry_after // 60 + 1} minute.",
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     except ValueError as exc:
         log.info("route %s/%s unavailable: %s", number, day, exc)
         raise HTTPException(
@@ -419,7 +442,17 @@ async def create_trip(
         raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
 
     try:
-        rt = await routes.get(client(), number, day)
+        limits.take_trip(device["id"])
+        rt = await routes.get(
+            client(), number, day, gate=lambda: limits.take_lookup(device["id"])
+        )
+    except limits.RateLimited as exc:
+        raise HTTPException(
+            429,
+            "Prea multe curse adăugate într-un timp scurt. "
+            f"Încearcă din nou în {exc.retry_after // 60 + 1} minute.",
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     except ValueError as exc:
         log.info("route %s/%s unavailable: %s", number, day, exc)
         raise HTTPException(
