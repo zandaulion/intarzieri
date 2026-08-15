@@ -122,6 +122,20 @@ The live map endpoint was **removed**. It pulled 1.7 MB per call for data the
 itinerary carries more precisely, and nothing in the app consumed it. That
 also retired `iris.py` and the bundled 102 KB station list.
 
+### Backing off
+
+A failed watcher pass doubles the interval — 5 min, 10, 20, 30 — capped at
+`BACKOFF_MAX_SECONDS` and reset the instant a fetch succeeds. A single failed
+pass keeps the normal interval, so a blip changes nothing; a day-long outage
+costs 50 requests per watched train instead of 288.
+
+A pass with nothing due neither counts against us nor clears an existing
+backoff: it taught us nothing either way.
+
+Note the circuit breaker does **not** do this job. Its cooldown (60 s) is far
+shorter than the watch interval, so it has expired long before the next pass
+— it exists to keep interactive searches fast, not to pace the watcher.
+
 ## Alerts
 
 `ops.py` publishes to [ntfy](https://ntfy.sh) on **state changes only** — one

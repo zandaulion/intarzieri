@@ -35,6 +35,10 @@ ROUTE_TIMEOUT = float(os.getenv("ROUTE_TIMEOUT", "12"))
 # candidate runs that is twice over.
 BREAKER_FAILS = int(os.getenv("BREAKER_FAILS", "3"))
 BREAKER_COOLDOWN = int(os.getenv("BREAKER_COOLDOWN", "60"))
+# Ceiling for the watcher's backoff. A source that has been unreachable for
+# an hour is not going to be fixed by asking every five minutes, and that
+# knocking is what gets an address blocked in the first place.
+BACKOFF_MAX = int(os.getenv("BACKOFF_MAX_SECONDS", "1800"))
 UPSTREAM_TIMEOUT = float(os.getenv("UPSTREAM_TIMEOUT", "45"))
 USER_AGENT = os.getenv(
     "USER_AGENT",
@@ -134,8 +138,20 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
+def backoff_delay(misses: int) -> int:
+    """Seconds until the next pass after `misses` consecutive failed ones.
+
+    Doubles from the normal interval and caps at BACKOFF_MAX; 0 misses is the
+    normal interval, so a healthy server is unaffected.
+    """
+    if misses <= 0:
+        return WATCH_SECONDS
+    return min(WATCH_SECONDS * (2 ** min(misses - 1, 16)), BACKOFF_MAX)
+
+
 async def watcher() -> None:
     """Drives trip notifications. Sleeps cheaply when nobody is watching."""
+    misses = 0
     while True:
         try:
             result = await trips.watch_once(client())
@@ -143,16 +159,30 @@ async def watcher() -> None:
                 log.info("watch pass: %s", result)
             app.state.last_watch = result
             # Every watched train failing means the source, not the train.
-            if result["polled"] and result["errors"] >= result["polled"]:
-                await ops.upstream.set(
-                    False, f"{result['errors']} trenuri urmărite, niciunul accesibil.")
-            elif result["polled"]:
-                await ops.upstream.set(True)
+            # A pass with nothing due teaches us nothing either way, so it
+            # neither counts against us nor clears an existing backoff.
+            if result["polled"]:
+                if result["errors"] >= result["polled"]:
+                    misses += 1
+                    await ops.upstream.set(
+                        False,
+                        f"{result['errors']} trenuri urmărite, niciunul accesibil.",
+                    )
+                else:
+                    misses = 0
+                    await ops.upstream.set(True)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
+            misses += 1
             log.warning("watch pass failed: %s", exc)
-        await asyncio.sleep(WATCH_SECONDS)
+
+        delay = backoff_delay(misses)
+        app.state.next_pass_seconds = delay
+        app.state.consecutive_misses = misses
+        if misses:
+            log.info("backing off after %d failed pass(es): next in %ds", misses, delay)
+        await asyncio.sleep(delay)
 
 
 # --------------------------------------------------------------------------
@@ -199,6 +229,8 @@ async def lifespan(app: FastAPI):
             device_id, code,
         )
     app.state.last_watch = None
+    app.state.consecutive_misses = 0
+    app.state.next_pass_seconds = WATCH_SECONDS
     _client = httpx.AsyncClient(
         follow_redirects=True,
         timeout=UPSTREAM_TIMEOUT,
@@ -225,6 +257,8 @@ async def health():
         "upstream_failures": routes.failures,
         "upstream_down": routes.tripped,
         "watch_seconds": WATCH_SECONDS,
+        "consecutive_misses": getattr(app.state, "consecutive_misses", 0),
+        "next_pass_seconds": getattr(app.state, "next_pass_seconds", WATCH_SECONDS),
     }
 
 
