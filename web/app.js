@@ -35,7 +35,8 @@ const whenLabel = (iso) => {
 };
 
 const state = {
-  route: null, branch: 0, from: null, to: null, sub: null,
+  route: null, branch: 0, from: null, to: null, sub: null, number: null,
+  run: null,         // chosen run date, once the user overrides the default
   open: null,        // id of the expanded trip card
   routes: new Map(), // number|run_date -> route, so reopening is instant
   active: 0,         // trips currently being watched
@@ -71,13 +72,15 @@ $('form-train').addEventListener('submit', async (e) => {
   e.preventDefault();
   const num = $('number').value.trim().replace(/\D/g, '');
   if (!num) return;
+  if (num !== state.number) { state.run = null; state.number = num; }
   const err = $('train-err');
   err.hidden = true;
   const btn = e.target.querySelector('button');
   btn.disabled = true;
   btn.textContent = 'Se caută…';
   try {
-    state.route = await api(`/api/route/${encodeURIComponent(num)}`);
+    state.route = await api(`/api/route/${encodeURIComponent(num)}`
+      + (state.run ? `?date=${state.run}` : ''));
     // A train can be published as several variants of the same run; start on
     // the one InfoFer shows by default.
     const def = state.route.branches.findIndex((b) => b.is_default);
@@ -139,6 +142,21 @@ function renderRoute() {
       ? 'Acum atinge stația în care cobori.'
       : 'Atinge orice stație ca să reîncepi.';
 
+  // An overnight train still under way and tonight's departure share a
+  // number; say which one is on screen rather than silently picking.
+  const runs = r.runs || [];
+  const runPicker = runs.length > 1
+    ? `<div class="branches">${runs.map((run) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const d = new Date(run.date + 'T00:00:00');
+        const label = run.date === today ? 'Cursa de azi'
+          : `Cursa de ${d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}`;
+        const on = run.date === r.run_date;
+        return `<button class="chip${on ? ' on' : ''}" data-run="${esc(run.date)}">
+            ${esc(label)}${run.in_progress ? ' · în mers' : ''}</button>`;
+      }).join('')}</div>`
+    : '';
+
   const picker = r.branches.length > 1
     ? `<div class="branches">${r.branches.map((b, i) =>
         `<button class="chip${i === state.branch ? ' on' : ''}" data-b="${i}">
@@ -160,7 +178,18 @@ function renderRoute() {
   $('route-card').querySelectorAll('.stop').forEach((el) => {
     el.addEventListener('click', () => selectStop(Number(el.dataset.i)));
   });
-  $('route-card').querySelectorAll('.chip').forEach((el) => {
+  $('route-card').querySelectorAll('[data-run]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      state.run = el.dataset.run;
+      state.from = state.to = null;
+      $('step-notify').hidden = true;
+      state.route = await api(
+        `/api/route/${encodeURIComponent(state.number)}?date=${state.run}`);
+      state.branch = Math.max(0, state.route.branches.findIndex((b) => b.is_default));
+      renderRoute();
+    });
+  });
+  $('route-card').querySelectorAll('.chip[data-b]').forEach((el) => {
     el.addEventListener('click', () => {
       state.branch = Number(el.dataset.b);
       state.from = state.to = null;
@@ -198,6 +227,8 @@ function selectStop(i) {
 function resetPicker() {
   state.route = null;
   state.branch = 0;
+  state.run = null;
+  state.number = null;
   state.from = state.to = null;
   $('number').value = '';
   $('route-card').innerHTML = '';

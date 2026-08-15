@@ -26,6 +26,17 @@ empty on the first attempt. So one itinerary costs two requests.
 
 An identifying `User-Agent` is sent and works — no browser spoofing needed.
 
+### Which run
+
+Searching a number without a date does not simply mean "today". An overnight
+service that left yesterday evening is still running this morning, while
+today's run of the same number has not departed yet -- defaulting to today
+would offer tonight's train to someone sitting on the one in motion. So when
+today's run is still in the future, the previous day's is fetched and
+preferred if it is genuinely under way. The response lists both in `runs` so
+the UI can offer the choice, and that second fetch only happens in the
+ambiguous case; a daytime train costs one request as before.
+
 ### Branches
 
 A train may be published as several *branches*: alternative descriptions of

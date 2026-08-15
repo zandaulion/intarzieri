@@ -16,7 +16,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -318,6 +318,57 @@ async def train(number: str, device: dict = Depends(current_device)):
 # --------------------------------------------------------------------------
 # itinerary + trip subscriptions
 # --------------------------------------------------------------------------
+def _edges(rt: R.Route) -> tuple[datetime | None, datetime | None]:
+    """First departure and last arrival of a run, as real expected times."""
+    b = rt.default
+    start = R.parse_ro_date(rt.date)
+    first, last = b.stops[0], b.stops[-1]
+    dep = R.actual_dt(
+        start,
+        first.dep_scheduled or first.arr_scheduled,
+        first.dep_delay if first.dep_scheduled else first.arr_delay,
+        first.dep_day_offset if first.dep_scheduled else first.arr_day_offset,
+    )
+    arr = R.actual_dt(
+        start,
+        last.arr_scheduled or last.dep_scheduled,
+        last.arr_delay if last.arr_scheduled else last.dep_delay,
+        last.arr_day_offset if last.arr_scheduled else last.dep_day_offset,
+    )
+    return dep, arr
+
+
+async def _pick_run(number: str, day: date) -> tuple[R.Route, list[dict]]:
+    """Choose which day's run the user most likely means.
+
+    An overnight train that left yesterday evening is still running this
+    morning, while today's run of the same number has not departed yet.
+    Defaulting to today would offer tonight's train to someone sitting on the
+    one currently in motion -- so when today's run is still in the future,
+    check whether yesterday's is out there and prefer it.
+    """
+    today_rt = await routes.get(client(), number, day)
+    now = datetime.now(R.RO)
+    runs = [{"date": day.isoformat(), "in_progress": False}]
+
+    dep, _ = _edges(today_rt)
+    if not dep or now >= dep:
+        return today_rt, []                      # already under way; no ambiguity
+
+    prev = day - timedelta(days=1)
+    try:
+        prev_rt = await routes.get(client(), number, prev)
+    except Exception:                            # noqa: BLE001 - not every train ran
+        return today_rt, []
+
+    p_dep, p_arr = _edges(prev_rt)
+    if not (p_arr and p_dep and p_dep <= now < p_arr):
+        return today_rt, []
+
+    runs.insert(0, {"date": prev.isoformat(), "in_progress": True})
+    return prev_rt, runs
+
+
 @app.get("/api/route/{number}")
 async def train_route(
     number: str,
@@ -330,8 +381,12 @@ async def train_route(
     except ValueError:
         raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
 
+    runs: list[dict] = []
     try:
-        rt = await routes.get(client(), number, day)
+        if when:
+            rt = await routes.get(client(), number, day)
+        else:
+            rt, runs = await _pick_run(number, day)
     except ValueError as exc:
         log.info("route %s/%s unavailable: %s", number, day, exc)
         raise HTTPException(
@@ -371,6 +426,9 @@ async def train_route(
         "number": rt.number,
         "category": rt.category,
         "run_date": start.isoformat(),
+        # Populated only when the same number has two plausible runs today --
+        # an overnight service still under way plus tonight's departure.
+        "runs": runs,
         # A train may be published as several variants of the same run; the
         # default one is what InfoFer shows first.
         "branches": [shape_branch(b) for b in rt.branches],
