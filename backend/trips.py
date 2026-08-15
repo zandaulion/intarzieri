@@ -67,7 +67,10 @@ CREATE TABLE IF NOT EXISTS trips (
     -- Planned times captured at subscribe time, so the watcher can decide
     -- whether a trip is worth fetching without first fetching it.
     dep_planned TEXT,
-    arr_planned TEXT
+    arr_planned TEXT,
+    -- Set on demand when the owner shares this trip. Reusable and multi-use:
+    -- a family follows one link. Dies with the trip it points at.
+    share_code  TEXT
 );
 """
 
@@ -81,6 +84,10 @@ CREATE INDEX IF NOT EXISTS trips_device ON trips(device_id);
 -- got device_id via ALTER TABLE, which carries no constraint, so the index
 -- has to be created explicitly rather than relying on the column definition.
 CREATE UNIQUE INDEX IF NOT EXISTS push_subs_device ON push_subs(device_id);
+-- Created explicitly: share_code reaches migrated databases via ALTER TABLE,
+-- which in SQLite carries no constraint of its own.
+CREATE UNIQUE INDEX IF NOT EXISTS trips_share ON trips(share_code)
+    WHERE share_code IS NOT NULL;
 """
 
 
@@ -90,7 +97,7 @@ def init() -> list[int]:
         # devices must exist first: push_subs and trips reference it.
         accounts.init_schema(con)
         con.executescript(SCHEMA)
-        for col, decl in (("branch_code", "TEXT"),):
+        for col, decl in (("branch_code", "TEXT"), ("share_code", "TEXT")):
             if col not in columns(con, "trips"):
                 con.execute(f"ALTER TABLE trips ADD COLUMN {col} {decl}")
                 log.info("migrated trips: added %s", col)
@@ -204,6 +211,55 @@ def _save_sub_blocking(device_id: int, sub: dict) -> None:
 
 async def save_subscription(device_id: int, sub: dict) -> None:
     await asyncio.to_thread(_save_sub_blocking, device_id, sub)
+
+
+def _share_trip_blocking(trip_id: int, device_id: int, code: str) -> str | None:
+    """Return the trip's share code, minting one the first time."""
+    with connect() as con:
+        row = con.execute(
+            "SELECT share_code FROM trips WHERE id = ? AND device_id = ?",
+            (trip_id, device_id),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["share_code"]:
+            return row["share_code"]
+        con.execute("UPDATE trips SET share_code = ? WHERE id = ?", (code, trip_id))
+        return code
+
+
+async def share_trip(trip_id: int, device_id: int, code: str) -> str | None:
+    return await asyncio.to_thread(_share_trip_blocking, trip_id, device_id, code)
+
+
+def _by_share_blocking(code: str) -> dict | None:
+    with connect() as con:
+        row = con.execute(
+            "SELECT * FROM trips WHERE share_code = ?", (code,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+async def by_share(code: str) -> dict | None:
+    return await asyncio.to_thread(_by_share_blocking, code)
+
+
+def _already_watching_blocking(device_id: int, number: str, run_date: str,
+                               from_slug: str, to_slug: str) -> int | None:
+    with connect() as con:
+        row = con.execute(
+            """SELECT id FROM trips
+                WHERE device_id = ? AND number = ? AND run_date = ?
+                  AND from_slug = ? AND to_slug = ? AND active = 1""",
+            (device_id, number, run_date, from_slug, to_slug),
+        ).fetchone()
+        return row["id"] if row else None
+
+
+async def already_watching(device_id: int, number: str, run_date: str,
+                           from_slug: str, to_slug: str) -> int | None:
+    return await asyncio.to_thread(
+        _already_watching_blocking, device_id, number, run_date, from_slug, to_slug)
 
 
 class TripLimitReached(Exception):

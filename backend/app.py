@@ -657,3 +657,92 @@ async def admin_revoke_invite(invite_id: int):
     if not await accounts.revoke_invite(invite_id):
         raise HTTPException(404, "no such unused invite")
     return {"revoked": invite_id}
+
+
+# --------------------------------------------------------------------------
+# sharing a watched trip
+# --------------------------------------------------------------------------
+@app.post("/api/trips/{trip_id}/share")
+async def share_trip(trip_id: int, device: dict = Depends(current_device)):
+    """Mint (or return) a link that lets other registered devices follow the
+    same train and leg without repeating the search."""
+    code = await trips.share_trip(trip_id, device["id"], accounts.new_invite_code())
+    if not code:
+        raise HTTPException(404, "Nu există această cursă pe acest dispozitiv.")
+    base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    return {"code": code, "url": f"{base}/s/{code}" if base else None}
+
+
+@app.get("/api/share/{code}")
+async def share_preview(code: str, device: dict = Depends(current_device)):
+    """What a share link points at.
+
+    Behind current_device deliberately: a share link is not a way into the
+    app. It saves a registered user the search; it never replaces an invite.
+    """
+    trip = await trips.by_share(accounts.normalise_code(code) or code)
+    if not trip:
+        raise HTTPException(404, "Link-ul nu mai este valid.")
+    existing = await trips.already_watching(
+        device["id"], trip["number"], trip["run_date"],
+        trip["from_slug"], trip["to_slug"],
+    )
+    return {
+        "number": trip["number"],
+        "run_date": trip["run_date"],
+        "from_name": trip["from_name"],
+        "to_name": trip["to_name"],
+        "dep_planned": trip["dep_planned"],
+        "arr_planned": trip["arr_planned"],
+        "finished": not trip["active"],
+        "already_following": existing is not None,
+    }
+
+
+@app.post("/api/share/{code}/follow")
+async def share_follow(code: str, device: dict = Depends(current_device)):
+    src = await trips.by_share(accounts.normalise_code(code) or code)
+    if not src:
+        raise HTTPException(404, "Link-ul nu mai este valid.")
+    if not src["active"]:
+        raise HTTPException(410, "Cursa s-a încheiat deja.")
+
+    existing = await trips.already_watching(
+        device["id"], src["number"], src["run_date"],
+        src["from_slug"], src["to_slug"],
+    )
+    if existing:
+        return {"id": existing, "already": True}
+
+    try:
+        trip_id = await trips.add_trip(
+            device["id"],
+            {},
+            {
+                "number": src["number"],
+                "run_date": src["run_date"],
+                "from_slug": src["from_slug"],
+                "from_name": src["from_name"],
+                "to_slug": src["to_slug"],
+                "to_name": src["to_name"],
+                "dep_planned": src["dep_planned"],
+                "arr_planned": src["arr_planned"],
+                "branch_code": src["branch_code"],
+            },
+        )
+    except trips.TripLimitReached as exc:
+        raise HTTPException(
+            409,
+            f"Poți urmări {exc.limit} trenuri simultan. "
+            "Oprește unul înainte de a adăuga altul.",
+        )
+
+    # Adopt the train's current state so a follower who joins mid-journey is
+    # not told it departed hours ago -- same rule as subscribing directly.
+    try:
+        rt = await routes.get(client(), src["number"], date.fromisoformat(src["run_date"]))
+        await trips.prime(trip_id, rt)
+    except Exception as exc:  # noqa: BLE001 - priming is best effort
+        log.info("could not prime shared trip %s: %r", trip_id, exc)
+
+    return {"id": trip_id, "already": False}

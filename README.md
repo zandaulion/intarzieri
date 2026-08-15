@@ -235,6 +235,34 @@ the installed app. Recipients should add the page to the Home Screen first,
 open it from there, and type the code. That is why the invite is a typeable
 code and not only a link.
 
+## Sharing a watched trip
+
+A trip can be shared so others follow the same train and leg without
+repeating the search — one link, reusable, for the whole family.
+
+```
+owner: Distribuie  ->  https://…/s/K5PA-BWLN-5UWA
+                            |
+                   recipient opens  ->  "1912 din Sibiu până în Constanța"
+                            |            [Urmărește]
+                            v
+                   their own trip, their own notifications
+```
+
+Two things this deliberately is not:
+
+* **Not a way into the app.** The preview endpoint sits behind
+  `current_device` like everything else, so an unregistered visitor gets the
+  invite gate, not the train. A share link saves a registered user the
+  search; it never replaces an invite.
+* **Not a shared subscription.** The follower gets their own trip row, so it
+  counts against their own limit, they can stop watching without affecting
+  anyone, and the original is untouched. Following twice is idempotent.
+
+Following requests push permission *before* creating the trip: the watcher
+only notifies devices that have a subscription, so following without one
+would appear to work and then never say anything.
+
 ## Layout
 
 ```

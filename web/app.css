@@ -192,3 +192,7 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
 .install-text span{color:var(--muted)}
 .install-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .install-actions .btn{padding:9px 17px;font-size:.88rem}
+.row .share{margin-left:6px;font-size:1rem;line-height:1;color:var(--muted);flex:none}
+.row .share:hover{color:var(--accent)}
+#follow .card{margin-top:8px}
+#follow h2{font-size:1.05rem;text-transform:none;letter-spacing:0;color:var(--text);margin-bottom:8px}

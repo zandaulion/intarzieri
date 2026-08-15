@@ -444,6 +444,8 @@ async function refreshTrips() {
                 <em>${esc(status)}${esc(delay ? ' · ' + delay : '')}</em></span>
               <span class="rd">${esc(whenLabel(eta))}</span>
               <span class="chev" aria-hidden="true">${open ? '▴' : '▾'}</span>
+              <button class="link share" data-share="${t.id}"
+                      aria-label="Distribuie" title="Distribuie">⤴</button>
               <button class="link del" data-id="${t.id}" aria-label="Nu mai urmări">✕</button>
             </div>
             <div class="detail" id="detail-${t.id}"${open ? '' : ' hidden'}></div>
@@ -457,6 +459,25 @@ async function refreshTrips() {
       await api(`/api/trips/${el.dataset.id}`, null, 'DELETE');
       if (state.open === Number(el.dataset.id)) state.open = null;
       refreshTrips();
+    });
+  });
+
+  $('trip-list').querySelectorAll('[data-share]').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation();                       // the row is a toggle
+      try {
+        const r = await api(`/api/trips/${el.dataset.share}/share`, {});
+        const text = r.url || r.code;
+        if (navigator.share) {
+          await navigator.share({ title: 'Întârzieri', text: 'Urmărește acest tren:', url: r.url });
+        } else {
+          await copyText(text, null);
+          alert(`Link copiat:\n${text}\n\nCine îl deschide poate urmări acelaşi tren, `
+              + 'dar are nevoie de propria invitație pentru aplicație.');
+        }
+      } catch (ex) {
+        if (ex && ex.name !== 'AbortError') alert(ex.message);
+      }
     });
   });
 
@@ -678,10 +699,86 @@ async function start() {
   setInterval(refreshTrips, 60000);
 }
 
+async function showFollow(code) {
+  let info;
+  try {
+    info = await api(`/api/share/${encodeURIComponent(code)}`);
+  } catch (ex) {
+    // A share link is not a way in: an unregistered device gets the gate.
+    if (ex instanceof ApiError && ex.status === 401) { showGate(''); return; }
+    showApp(); await start();
+    alert(ex.message);
+    return;
+  }
+
+  const when = info.arr_planned
+    ? new Date(info.arr_planned).toLocaleString('ro-RO',
+        { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '';
+  $('follow-lead').innerHTML =
+    `<strong>${esc(info.number)}</strong> din <strong>${esc(info.from_name)}</strong> `
+    + `până în <strong>${esc(info.to_name)}</strong>`
+    + (when ? `<br>sosire programată ${esc(when)}` : '');
+
+  const btn = $('btn-follow');
+  if (info.finished) {
+    btn.disabled = true;
+    btn.textContent = 'Cursa s-a încheiat';
+  } else if (info.already_following) {
+    btn.disabled = true;
+    btn.textContent = 'Îl urmărești deja';
+  }
+  $('follow').hidden = false;
+  $('app').hidden = true;
+
+  const done = async () => {
+    history.replaceState({}, '', '/');
+    $('follow').hidden = true;
+    showApp();
+    await start();
+    await refreshTrips();
+  };
+  $('btn-follow-skip').onclick = done;
+  btn.onclick = async () => {
+    const err = $('follow-err');
+    err.hidden = true;
+    btn.disabled = true;
+    btn.textContent = 'Se adaugă…';
+    try {
+      // Register for push first. The watcher only notifies devices that have
+      // a subscription, so following without one would look like it worked
+      // and then never say anything.
+      try {
+        await getSubscription();
+      } catch (pushErr) {
+        if (!confirm('Nu am putut activa notificările ('
+                   + pushErr.message + ')\n\nAdaug totuși cursa? '
+                   + 'O vei vedea în listă, dar nu vei primi notificări.')) {
+          btn.disabled = false;
+          btn.textContent = 'Urmărește';
+          return;
+        }
+      }
+      await api(`/api/share/${encodeURIComponent(code)}/follow`, {});
+      await done();
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Urmărește';
+    }
+  };
+}
+
 async function boot() {
   const invite = location.pathname.match(/^\/i\/(.+)$/);
   if (invite) {
     showGate(decodeURIComponent(invite[1]));
+    return;
+  }
+  const shared = location.pathname.match(/^\/s\/(.+)$/);
+  if (shared) {
+    await showFollow(decodeURIComponent(shared[1]));
     return;
   }
   try {
