@@ -262,12 +262,15 @@ const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent || '');
    user where the Share button is -- which matters more there, because iOS
    only delivers push to an installed app. */
 let installPrompt = null;
+/* Session-scoped: while the app is still in a browser the offer returns
+   each launch, since notifications and the offline shell both want it on
+   the home screen. The dismissal only clears it for now. */
 const DISMISSED = 'tw-install-dismissed';
 
 function refreshInstallBar() {
   const bar = $('install');
   if (!bar) return;
-  if (standalone() || localStorage.getItem(DISMISSED)) {
+  if (standalone() || sessionStorage.getItem(DISMISSED)) {
     bar.hidden = true;
     return;
   }
@@ -378,7 +381,7 @@ $('btn-install').addEventListener('click', async () => {
 });
 
 $('btn-install-dismiss').addEventListener('click', () => {
-  try { localStorage.setItem(DISMISSED, '1'); } catch { /* private mode */ }
+  try { sessionStorage.setItem(DISMISSED, '1'); } catch { /* private mode */ }
   $('install').hidden = true;
 });
 
