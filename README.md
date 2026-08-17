@@ -221,7 +221,7 @@ request arrives from Caddy on loopback and per-IP limiting would be
 meaningless.
 
 Invites and devices are managed with `./admin.sh`, or from
-[admin-console](https://github.com/zandaulion/admin-console) — a graphical console fronting every app behind this
+[pwa-invite-console](https://github.com/zandaulion/pwa-invite-console) — a graphical console fronting every app behind this
 invite mechanism, which therefore lives in none of their repos.
 `/api/admin/*` is explicitly 404 on the public surface, so a later change to
 the public root cannot start leaking it.
