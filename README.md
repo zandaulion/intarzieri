@@ -220,8 +220,9 @@ in on iOS -- see below. Redemption is globally rate limited, since every
 request arrives from Caddy on loopback and per-IP limiting would be
 meaningless.
 
-Invites and devices are managed with `./admin.sh`, or from a graphical console
-that fronts several apps at once and therefore lives in none of their repos.
+Invites and devices are managed with `./admin.sh`, or from
+[admin-console](https://github.com/zandaulion/admin-console) — a graphical console fronting every app behind this
+invite mechanism, which therefore lives in none of their repos.
 `/api/admin/*` is explicitly 404 on the public surface, so a later change to
 the public root cannot start leaking it.
 
