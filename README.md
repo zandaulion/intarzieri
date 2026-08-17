@@ -220,15 +220,13 @@ in on iOS -- see below. Redemption is globally rate limited, since every
 request arrives from Caddy on loopback and per-IP limiting would be
 meaningless.
 
-The admin page lives at `/admin/` on the **tailnet-only** listener, served
-from a root the public site never maps; `/admin*` is explicitly 404 on the
-public surface so a later change to the public root cannot start leaking it.
-That listener is plain HTTP and therefore not a secure context, so
-`navigator.clipboard` does not exist there and the copy buttons fall back to
-`execCommand`.
+Invites and devices are managed with `./admin.sh`, or from a graphical console
+that fronts several apps at once and therefore lives in none of their repos.
+`/api/admin/*` is explicitly 404 on the public surface, so a later change to
+the public root cannot start leaking it.
 
-Its address is not recorded here — `./admin.sh` reads it from `site.env`,
-which is gitignored. Copy `site.env.example` to get started.
+The admin address is not recorded here — `./admin.sh` reads it from
+`site.env`, which is gitignored. Copy `site.env.example` to get started.
 
 Admin has **no password**: `/api/admin/*` exists only on the tailnet-only
 Caddy site, which injects `X-Admin: 1`. The public site refuses those paths
