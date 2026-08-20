@@ -5,7 +5,10 @@ const SHELL_CACHE = 'trains-shell-' + VERSION;
 const API_CACHE = 'trains-api';
 
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/manifest.webmanifest',
-               '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png'];
+               '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png',
+               // Precached: a push can arrive offline, and a badge that 404s
+               // leaves Android drawing the Chrome logo instead.
+               '/icons/badge-96.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -70,7 +73,7 @@ self.addEventListener('push', (e) => {
     tag: d.tag || 'train',
     renotify: true,
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    badge: '/icons/badge-96.png',
     data: d,
     vibrate: d.kind === 'delay' ? [90, 60, 90] : [140],
   }));
