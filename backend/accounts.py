@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS invites (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     used_at    TEXT,
+    -- Cancelled, rather than deleted, so the console can show that an invite
+    -- was withdrawn instead of leaving a gap indistinguishable from one that
+    -- was never sent.
+    revoked    INTEGER NOT NULL DEFAULT 0,
     -- The code in the clear, kept ONLY while the invite is still usable so it
     -- can be re-shown or re-copied. Wiped on redemption, so the table never
     -- holds a plaintext credential that still works. code_hash stays the
@@ -77,6 +81,13 @@ def init_schema(con) -> None:
     if "code_plain" not in have:
         con.execute("ALTER TABLE invites ADD COLUMN code_plain TEXT")
         log.info("migrated invites: added code_plain")
+    if "revoked" not in have:
+        # Cancelling an invite used to delete the row. It is flagged now, so
+        # the console can show that it was cancelled rather than leaving a gap
+        # that looks the same as an invite never sent. Existing rows are all
+        # live by definition -- the cancelled ones are already gone.
+        con.execute("ALTER TABLE invites ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0")
+        log.info("migrated invites: added revoked")
 
 
 # --------------------------------------------------------------------------
@@ -256,7 +267,7 @@ def _list_invites_blocking() -> list[dict]:
             dict(r)
             for r in con.execute(
                 """SELECT id, label, created_at, expires_at, used_at, device_id,
-                          adopt_id, code_plain
+                          adopt_id, revoked, code_plain
                      FROM invites ORDER BY id DESC"""
             )
         ]
@@ -268,8 +279,12 @@ async def list_invites() -> list[dict]:
 
 def _revoke_invite_blocking(invite_id: int) -> bool:
     with connect() as con:
+        # Flagged, not deleted. A cancelled invite that vanishes leaves no
+        # answer to "did I already cancel that, or never send it?" -- the
+        # console shows the row struck through instead, which is evidence.
         cur = con.execute(
-            "DELETE FROM invites WHERE id = ? AND used_at IS NULL", (invite_id,)
+            "UPDATE invites SET revoked = 1 WHERE id = ? AND used_at IS NULL AND revoked = 0",
+            (invite_id,),
         )
         return cur.rowcount > 0
 
@@ -306,6 +321,8 @@ def _redeem_blocking(code: str) -> tuple[int, str]:
         ).fetchone()
         if not row:
             raise InviteError("Codul de invitație nu este valid.")
+        if row["revoked"]:
+            raise InviteError("Invitația a fost anulată. Cere una nouă.")
         now = datetime.now(timezone.utc)
         if datetime.fromisoformat(row["expires_at"]) < now:
             raise InviteError("Invitația a expirat. Cere una nouă.")
