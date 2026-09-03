@@ -695,22 +695,7 @@ let started = false;
 async function start() {
   if (started) return;
   started = true;
-  if ('serviceWorker' in navigator) {
-    try {
-      // updateViaCache:'none' keeps the browser's http cache out of the worker's
-      // own update check, and update() asks on every load, so a deployed fix
-      // cannot sit behind a stale worker. controllerchange then reloads once
-      // when the new worker takes over.
-      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
-      reg.update().catch(() => {});
-      let reloading = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloading) return;
-        reloading = true;
-        location.reload();
-      });
-    } catch { /* the app still works without one */ }
-  }
+  // Service worker registration and updates live in index.html, via pwa-update.js.
   await refreshTrips();
   setInterval(refreshTrips, 60000);
 }

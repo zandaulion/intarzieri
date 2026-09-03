@@ -10,6 +10,8 @@ const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/manifest.webmanifest
                // leaves Android drawing the Chrome logo instead.
                '/icons/badge-96.png'];
 
+importScripts('/sw-update.js');
+
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -20,6 +22,9 @@ self.addEventListener('activate', (e) => {
     await Promise.all(keys.filter((k) => k.startsWith('trains-shell-') && k !== SHELL_CACHE)
                           .map((k) => caches.delete(k)));
     await self.clients.claim();
+    // Tell the open windows rather than reloading them from under whatever
+    // the person was doing. Each page decides when it is safe.
+    await announceUpdate();
   })());
 });
 

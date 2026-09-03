@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Updating Întârzieri…</title>
+<!--
+  The escape hatch, served at /bust with Cache-Control: no-store and
+  Clear-Site-Data: "cache". Nothing else on the origin should be able to
+  intercept it -- sw.js deliberately refuses to handle this path, or the way
+  out would sit behind the thing it exists to get out of.
+
+  Send someone here when their app is wedged on an old version and nothing
+  else has worked.
+-->
+<style>
+  body { display: grid; place-items: center; min-height: 100vh; margin: 0;
+         font-family: system-ui, sans-serif; background: #12140F; color: #EFF0E6;
+         text-align: center; }
+  .spinner { width: 34px; height: 34px; margin: 0 auto 16px;
+             border: 3px solid rgba(255,255,255,.2); border-top-color: #7CC79E;
+             border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s } }
+</style>
+<div>
+  <div class="spinner"></div>
+  <h2>Updating Întârzieri…</h2>
+  <p>Clearing the cache and loading the current version.</p>
+</div>
+<script>
+(async () => {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (err) {
+    console.warn('could not fully clear:', err);
+  }
+  // replace(), so going back does not land here again.
+  sessionStorage.setItem('pwa-kit:updated', '1');
+  location.replace('/');
+})();
+</script>
