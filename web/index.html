@@ -151,5 +151,10 @@
   </p>
 </div>
 <script src="/app.js?v=__BUILD_VERSION__"></script>
+<script type="module">
+  // Its own module, so the app script can stay a classic script.
+  import { installUpdates } from '/pwa-update.js';
+  installUpdates({ appName: 'Întârzieri', message: 'Întârzieri s-a actualizat la ultima versiune' });
+</script>
 </body>
 </html>
