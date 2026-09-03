@@ -10,6 +10,7 @@ departure, delay changes and arrival.
 """
 from __future__ import annotations
 
+import secrets
 import asyncio
 import logging
 import os
@@ -217,14 +218,25 @@ async def current_device(request: Request) -> dict:
     return device
 
 
-async def admin_only(x_admin: str | None = Header(None)) -> None:
-    """Admin lives on the tailnet-only Caddy site, which sets X-Admin.
+async def admin_only(x_admin_token: str | None = Header(None)) -> None:
+    """Admin access, proved by a shared secret rather than asserted by a header.
 
-    The public site both refuses /api/admin/* outright and strips the header,
-    so either control alone is enough -- being on the tailnet is the whole
-    authentication story.
+    This was ``X-Admin: 1`` -- a constant any caller could set. It was not
+    reachable from outside, because the public listener strips it and the
+    listener that injects it is bound to the tailnet, but that left the whole
+    admin surface resting on two lines of proxy configuration with nothing
+    behind them: anything reaching the port directly was admin.
+
+    Now the proxy passes a secret this process also knows, so being on the
+    right listener is no longer the same as being trusted.
+
+    Fails closed. A missing ADMIN_TOKEN means no, because treating an
+    unconfigured server as an open one is how a gate like this quietly stops
+    working. Compared with compare_digest so the answer takes the same time
+    whatever the guess.
     """
-    if x_admin != "1":
+    expected = (os.environ.get("ADMIN_TOKEN") or "").strip()
+    if not expected or not secrets.compare_digest(x_admin_token or "", expected):
         raise HTTPException(404, "Not Found")
 
 
