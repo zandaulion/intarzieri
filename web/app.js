@@ -72,23 +72,13 @@ $('form-train').addEventListener('submit', async (e) => {
   e.preventDefault();
   const num = $('number').value.trim().replace(/\D/g, '');
   if (!num) return;
-  if (num !== state.number) { state.run = null; state.number = num; }
   const err = $('train-err');
   err.hidden = true;
   const btn = e.target.querySelector('button');
   btn.disabled = true;
   btn.textContent = 'Se caută…';
   try {
-    state.route = await api(`/api/route/${encodeURIComponent(num)}`
-      + (state.run ? `?date=${state.run}` : ''));
-    // A train can be published as several variants of the same run; start on
-    // the one InfoFer shows by default.
-    const def = state.route.branches.findIndex((b) => b.is_default);
-    state.branch = def === -1 ? 0 : def;
-    state.from = state.to = null;
-    renderRoute();
-    $('step-leg').hidden = false;
-    $('step-notify').hidden = true;
+    await loadRoute(num, num === state.number ? state.run : null);
     $('step-leg').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (ex) {
     err.textContent = ex.message;
@@ -98,6 +88,271 @@ $('form-train').addEventListener('submit', async (e) => {
     btn.textContent = 'Caută';
   }
 });
+
+/* Fetch one run's itinerary and show it for picking stations. */
+async function loadRoute(number, run) {
+  const route = await api(`/api/route/${encodeURIComponent(number)}`
+    + (run ? `?date=${run}` : ''));
+  state.number = number;
+  state.run = run;
+  state.route = route;
+  // A train can be published as several variants of the same run; start on
+  // the one InfoFer shows by default.
+  const def = route.branches.findIndex((b) => b.is_default);
+  state.branch = def === -1 ? 0 : def;
+  state.from = state.to = null;
+  renderRoute();
+  $('step-leg').hidden = false;
+  $('step-notify').hidden = true;
+}
+
+/* ------------------------------------------------- step 1, by stations */
+/* The search runs on the server against CFR's published timetable, so it
+   costs no request to CFR. Only the train finally picked is looked up live. */
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
+};
+
+function setMode(mode) {
+  document.querySelectorAll('.modes .chip').forEach((b) =>
+    b.classList.toggle('on', b.dataset.mode === mode));
+  $('mode-number').hidden = mode !== 'number';
+  $('form-stations').hidden = mode !== 'stations';
+  $('results').hidden = mode !== 'stations' || !$('results').childElementCount;
+  $('train-err').hidden = true;
+  store.set('searchMode', mode);
+}
+document.querySelectorAll('.modes .chip').forEach((b) =>
+  b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+const localISO = (d = new Date()) =>
+  new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+// The chosen station behind each box; typing clears it until one is picked.
+const picked = { from: store.get('stFrom'), to: store.get('stTo') };
+
+function stationBox(key) {
+  const input = $(`st-${key}`);
+  const list = $(`sg-${key}`);
+  let items = [];
+  let active = -1;
+  let timer = null;
+  let seq = 0;
+
+  const close = () => {
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    active = -1;
+  };
+  const choose = (st) => {
+    picked[key] = st;
+    store.set(key === 'from' ? 'stFrom' : 'stTo', st);
+    input.value = st.name;
+    close();
+  };
+  const paint = () => {
+    list.innerHTML = items.map((st, i) =>
+      `<button type="button" role="option" class="${i === active ? 'act' : ''}"
+               data-i="${i}">${esc(st.name)}</button>`).join('');
+    list.hidden = !items.length;
+    input.setAttribute('aria-expanded', String(items.length > 0));
+  };
+  const lookup = async () => {
+    const q = input.value.trim();
+    const mine = ++seq;
+    if (q.length < 2) { items = []; paint(); return; }
+    try {
+      const res = await api(`/api/stations?q=${encodeURIComponent(q)}`);
+      if (mine !== seq) return;                 // a later keystroke won
+      items = res.stations;
+      active = -1;
+      paint();
+    } catch { /* suggestions are a convenience; the search reports errors */ }
+  };
+
+  input.addEventListener('input', () => {
+    picked[key] = null;
+    clearTimeout(timer);
+    timer = setTimeout(lookup, 150);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      paint();
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      choose(items[active]);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  // pointerdown, not click: the input's blur would close the list first.
+  list.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-i]');
+    if (!el) return;
+    e.preventDefault();
+    choose(items[Number(el.dataset.i)]);
+  });
+  input.addEventListener('blur', close);
+
+  if (picked[key]) input.value = picked[key].name;
+  return {
+    // Typed a name but never picked from the list: take the best match.
+    async resolve() {
+      if (picked[key]) return picked[key];
+      const q = input.value.trim();
+      if (!q) return null;
+      const res = await api(`/api/stations?q=${encodeURIComponent(q)}`);
+      if (!res.stations.length) return null;
+      choose(res.stations[0]);
+      return picked[key];
+    },
+    set(st) {
+      picked[key] = st;
+      store.set(key === 'from' ? 'stFrom' : 'stTo', st);
+      input.value = st ? st.name : '';
+    },
+  };
+}
+
+const boxFrom = stationBox('from');
+const boxTo = stationBox('to');
+$('st-date').value = localISO();
+
+$('btn-swap').addEventListener('click', () => {
+  const a = picked.from;
+  const b = picked.to;
+  const ta = $('st-from').value;
+  const tb = $('st-to').value;
+  boxFrom.set(b);
+  boxTo.set(a);
+  if (!b) $('st-from').value = tb;
+  if (!a) $('st-to').value = ta;
+});
+
+const duration = (min) => (min >= 60
+  ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}` : `${min} min`);
+
+let lastSearch = null;
+
+$('form-stations').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('train-err');
+  err.hidden = true;
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true;
+  btn.textContent = 'Se caută…';
+  try {
+    const [a, b] = await Promise.all([boxFrom.resolve(), boxTo.resolve()]);
+    if (!a || !b) throw new Error('Alege stația de plecare și pe cea de sosire din listă.');
+    const day = $('st-date').value || localISO();
+    lastSearch = await api(`/api/search?from=${a.code}&to=${b.code}&date=${day}`);
+    renderResults();
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+    $('results').hidden = true;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Caută';
+  }
+});
+
+// `chosen`: once a train is picked, the list folds to that one row so the
+// route and the notify step are not pushed below dozens of others.
+function renderResults(chosen = null) {
+  const r = lastSearch;
+  const host = $('results');
+  const dayLabel = new Date(`${r.date}T00:00:00`).toLocaleDateString('ro-RO',
+    { weekday: 'long', day: 'numeric', month: 'long' });
+  if (!r.trains.length) {
+    host.innerHTML = `<p class="rhead">Niciun tren direct de la ${esc(r.from.name)}
+      la ${esc(r.to.name)} ${esc(dayLabel)}.</p>`;
+    host.hidden = false;
+    return;
+  }
+  const now = Date.now();
+  const n = r.trains.length;
+  const shown = r.trains.map((t, i) => [t, i]).filter(([, i]) => chosen === null || i === chosen);
+  const head = chosen === null
+    ? `<p class="rhead">${n} ${n === 1 ? 'tren direct' : 'trenuri directe'}, ${esc(dayLabel)}</p>`
+    : `<p class="rhead">${esc(dayLabel)} ·
+         <button type="button" class="link" id="btn-all">Arată toate cele ${n}</button></p>`;
+  host.innerHTML = head + shown.map(([t, i]) => {
+      const gone = new Date(`${r.date}T${t.departs}:00`).getTime() < now;
+      const ends = [t.origin !== r.from.name ? `din ${t.origin}` : '',
+        t.terminus !== r.to.name ? `spre ${t.terminus}` : ''].filter(Boolean).join(' ');
+      return `<button type="button" class="result${gone ? ' gone' : ''}" data-i="${i}">
+          <span class="times">${esc(t.departs)} → ${esc(t.arrives)}${
+            t.arrives_day_offset ? `<sup>+${t.arrives_day_offset}</sup>` : ''}</span>
+          <span class="train">${esc(t.category)} ${esc(t.number)}</span>
+          <span class="dur">${esc(duration(t.duration_min))}</span>
+          <span class="via">${esc([t.operator, ends].filter(Boolean).join(' · '))}</span>
+        </button>`;
+    }).join('');
+  host.hidden = false;
+  host.querySelectorAll('.result').forEach((el) =>
+    el.addEventListener('click', () => pickResult(Number(el.dataset.i), el)));
+  $('btn-all')?.addEventListener('click', () => renderResults());
+}
+
+/* Station names differ between the timetable and InfoFer ("Ulmeni Hm." vs
+   "Ulmeni"), so match on a key that drops diacritics and halt suffixes, and
+   fall back to the stop's position when the two lists are the same length. */
+const HALT = new Set(['h', 'hm', 'hc', 'hcv', 'tj', 'gr']);
+const matchKey = (name) => (String(name || '').normalize('NFD')
+  .replace(/[̀-ͯ]/g, '').toLowerCase().match(/[a-z0-9]+/g) || [])
+  .filter((w) => !HALT.has(w)).join(' ');
+
+function locate(stops, name, expected, sameLength) {
+  const key = matchKey(name);
+  let best = -1;
+  stops.forEach((sp, i) => {
+    if (matchKey(sp.name) !== key) return;
+    if (best === -1 || Math.abs(i - expected) < Math.abs(best - expected)) best = i;
+  });
+  if (best === -1 && sameLength && expected < stops.length) best = expected;
+  return best;
+}
+
+async function pickResult(index, el) {
+  const hit = lastSearch.trains[index];
+  const err = $('train-err');
+  err.hidden = true;
+  el.disabled = true;
+  try {
+    await loadRoute(hit.number, hit.run_date);
+    renderResults(index);
+    const r = lastSearch;
+    const order = [state.branch,
+      ...state.route.branches.map((_, i) => i).filter((i) => i !== state.branch)];
+    for (const bi of order) {
+      const stops = state.route.branches[bi].stops;
+      const same = stops.length === hit.stop_count;
+      const f = locate(stops, r.from.name, hit.from_index, same);
+      const t = locate(stops, r.to.name, hit.to_index, same);
+      if (f !== -1 && t !== -1 && f < t) {
+        state.branch = bi;
+        state.from = state.to = null;
+        selectStop(f);
+        selectStop(t);                 // shows step 3
+        return;
+      }
+    }
+    // Could not place both stations: leave the choice to the user.
+    $('step-leg').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+  } finally {
+    el.disabled = false;
+  }
+}
+
+if (store.get('searchMode') === 'stations') setMode('stations');
 
 /* ---------------------------------------------------------------- step 2 */
 function stopRows(stops, { from = null, to = null, interactive = false } = {}) {

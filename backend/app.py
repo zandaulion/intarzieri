@@ -26,6 +26,7 @@ import limits
 import ops
 import push
 import route as R
+import timetable
 import trips
 
 WATCH_SECONDS = int(os.getenv("WATCH_SECONDS", "180"))
@@ -263,12 +264,16 @@ async def lifespan(app: FastAPI):
         headers={"User-Agent": USER_AGENT},
     )
     task = asyncio.create_task(watcher())
+    # Station search reads CFR's published timetable, not InfoFer; it is
+    # built on first start and checked for a newer file once a day.
+    timetable_task = asyncio.create_task(timetable.keep_fresh(USER_AGENT))
     ops.fire(ops.send("Serviciul a pornit.", title=f"{ops.APP_NAME}: pornit",
                       tags="arrow_up", priority="low"))
     try:
         yield
     finally:
         task.cancel()
+        timetable_task.cancel()
         await _client.aclose()
 
 
@@ -286,7 +291,57 @@ async def health():
         **limits.snapshot(),
         "consecutive_misses": getattr(app.state, "consecutive_misses", 0),
         "next_pass_seconds": getattr(app.state, "next_pass_seconds", WATCH_SECONDS),
+        "timetable": timetable.info(),
     }
+
+
+# --------------------------------------------------------------------------
+# search by stations -- answered from the published timetable, no CFR request
+# --------------------------------------------------------------------------
+TIMETABLE_LOADING = ("Mersul trenurilor se încarcă după o actualizare. "
+                     "Încearcă din nou peste un minut.")
+
+
+@app.get("/api/stations")
+async def station_suggestions(
+    q: str = Query("", max_length=60), device: dict = Depends(current_device)
+):
+    try:
+        return {"stations": timetable.stations(q)}
+    except timetable.NotReady:
+        raise HTTPException(503, TIMETABLE_LOADING)
+
+
+@app.get("/api/search")
+async def search_by_stations(
+    origin: int = Query(..., alias="from"),
+    destination: int = Query(..., alias="to"),
+    when: str | None = Query(None, alias="date"),
+    device: dict = Depends(current_device),
+):
+    try:
+        day = date.fromisoformat(when) if when else datetime.now(R.RO).date()
+    except ValueError:
+        raise HTTPException(400, "Data trebuie să fie în formatul AAAA-LL-ZZ.")
+    try:
+        a, b = timetable.station(origin), timetable.station(destination)
+        if not a or not b:
+            raise HTTPException(404, "Nu cunosc una dintre stații. Alege-o din listă.")
+        if a["code"] == b["code"]:
+            raise HTTPException(400, "Stația de plecare și cea de sosire trebuie să difere.")
+        meta = timetable.info() or {}
+        valid_to = meta.get("valid_to", "")
+        if valid_to and day.strftime("%Y%m%d") > valid_to:
+            last = datetime.strptime(valid_to, "%Y%m%d").strftime("%d.%m.%Y")
+            raise HTTPException(
+                404,
+                f"Mersul trenurilor publicat acoperă zilele până la {last}. "
+                "Cel pentru anul următor apare de obicei la începutul lui decembrie.",
+            )
+        found = timetable.search(a["code"], b["code"], day)
+    except timetable.NotReady:
+        raise HTTPException(503, TIMETABLE_LOADING)
+    return {"date": day.isoformat(), "from": a, "to": b, "trains": found}
 
 
 # --------------------------------------------------------------------------
