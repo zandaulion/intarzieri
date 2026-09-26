@@ -196,3 +196,35 @@ h2{font-size:.76rem;margin:0;text-transform:uppercase;letter-spacing:.08em;color
 .row .share:hover{color:var(--accent)}
 #follow .card{margin-top:8px}
 #follow h2{font-size:1.05rem;text-transform:none;letter-spacing:0;color:var(--text);margin-bottom:8px}
+
+/* search by stations */
+.modes{margin-bottom:12px}
+.stations{display:grid;grid-template-columns:1fr auto;gap:9px;margin-bottom:6px}
+.stations .field{position:relative;grid-column:1}
+.stations .swap{grid-column:2;grid-row:1 / span 2;align-self:center;font:inherit;font-size:1.1rem;
+  width:42px;height:42px;border-radius:11px;border:1px solid var(--border);background:var(--surface);
+  color:var(--accent);cursor:pointer}
+.stations .when{grid-column:1 / -1;display:flex;gap:9px}
+.stations .hint{grid-column:1 / -1;margin-top:0}
+.stations input{width:100%;font:inherit;padding:11px 14px;border-radius:11px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text)}
+.stations .when input{flex:1;min-width:0}
+.stations input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.suggest{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;background:var(--surface);
+  border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);overflow:hidden}
+.suggest button{display:block;width:100%;text-align:left;font:inherit;padding:9px 14px;border:0;
+  background:none;color:var(--text);cursor:pointer}
+.suggest button:hover,.suggest button.act{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.results{display:flex;flex-direction:column;gap:7px;margin-top:14px}
+.results .rhead{font-size:.82rem;color:var(--muted);margin:0 0 2px}
+.result{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;align-items:baseline;text-align:left;
+  font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:10px 14px;cursor:pointer}
+.result:hover{border-color:var(--accent)}
+.result .times{font-weight:750;font-variant-numeric:tabular-nums;white-space:nowrap}
+.result .times sup{font-size:.68rem;color:var(--muted);margin-left:2px}
+.result .train{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:650;font-size:.9rem}
+.result .dur{color:var(--muted);font-size:.82rem;text-align:right;white-space:nowrap}
+.result .via{grid-column:1 / -1;color:var(--muted);font-size:.8rem;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.result.gone{opacity:.55}

@@ -1,7 +1,8 @@
 # Întârzieri
 
 Watch one Romanian train between two stations and get a push notification when
-it departs, when its delay changes, and when it arrives.
+it departs, when its delay changes, and when it arrives. Find the train by its
+number, or by the stations and date of the journey.
 
 Reached over a Cloudflare Tunnel, which terminates TLS and connects outbound
 to Caddy on loopback — the host has no public IP and no inbound ports open.
@@ -26,6 +27,9 @@ empty on the first attempt. So one itinerary costs two requests.
 
 An identifying `User-Agent` is sent and works — no browser spoofing needed.
 
+A third source serves search by stations: CFR's timetable, published as open
+data. See [Searching by stations](#searching-by-stations).
+
 ### Which run
 
 Searching a number without a date does not simply mean "today". An overnight
@@ -45,6 +49,55 @@ the same run. IR 1996 appears as both `Constanța–Craiova` (12 stops) and
 sections and **must** be parsed separately — concatenating them produces
 duplicate stations and a timeline that jumps backwards. The one InfoFer shows
 by default is the one without `d-none`.
+
+## Searching by stations
+
+InfoFer's own station search is the ReCaptcha-gated part, so it is not used.
+The timetable behind it is published instead: each passenger operator's year
+is one XML file on [data.gov.ro](https://data.gov.ro/organization/sc-informatica-feroviara-sa)
+(`trenuri-2025-2026_sntfc.xml` and six siblings: Regio, Interregional,
+Transferoviar, Astra, Softrans, Ferotrafic). `timetable.py` downloads them,
+keeps only the stops a passenger can use, and writes `timetable.db` next to
+`trips.db`. A search is then a local query: **it costs no request to CFR**,
+and needs no rate limit. Only the train finally picked is looked up live, and
+that goes through the ordinary itinerary path and its budget.
+
+The index is built on first start (about ten seconds for 2,065 trains) and
+data.gov.ro is asked once a day whether a file changed; an unchanged set is
+not downloaded again. A new year is usually published in early December,
+days before the timetable change, and the two newest files per operator are
+kept so the search is right on either side of the change. A date beyond the
+published year gets a message saying so rather than an empty list.
+
+What the files say, checked against the live site:
+
+| In the XML | Means |
+|---|---|
+| `ElementTrasa` | one segment; its `TipOprire` describes the station it leaves |
+| `TipOprire` `C` or `A` | a stop InfoFer lists. `N` is passing through, `T` a technical halt; neither is shown |
+| `OraP`, `OraS` | departure and arrival as **time of day** in seconds. They wrap at midnight, so day rollovers are counted the way `route.py` counts them |
+| `CalendarTren` `Zile` | bits 0–6 are Monday to Sunday. Higher bits are set on nearly every train and are not weekdays; a calendar with no weekday bit is a train InfoFer does not publish |
+| gaps between `CalendarTren` ranges | public holidays: 25 December, Easter and the like are simply left out of the ranges |
+
+A passenger boarding after midnight on a train that left the evening before
+is found through that train's own start date, which is also the run date the
+itinerary lookup needs; the result carries it.
+
+Two things do not line up and are handled:
+
+* **Station names differ.** The file says *Ulmeni Hm.*, *Gen. Gh. Avramescu
+  Hm.* and spells ş/ţ with cedillas; InfoFer says *Ulmeni*, *General Gh.
+  Avramescu* and uses commas. Choosing a result selects the boarding and
+  alighting stations on the live route by name with diacritics and halt
+  suffixes removed, and by position in the stop list when the names still
+  do not match and the two lists are the same length. The lists usually are
+  the same length, but not always (IR 16535: 17 stops published, 18 live),
+  so position alone is not trusted. If neither works, the route is shown for
+  the user to tap as before.
+* **București Nord is two stations**, `Gr.A` and `Gr.B`, its platform groups.
+  They are searched as one.
+
+Results are direct trains only. A journey with a change is two searches.
 
 ## How events are decided
 
@@ -290,17 +343,18 @@ would appear to work and then never say anything.
 backend/
   db.py       sqlite connection handling
   accounts.py devices, invites, cookie tokens
-  iris.py     live-map parser (positions, delays, nearest station)
   route.py    itinerary parser: branches, stops, day rollover, delays
+  timetable.py published timetable: download, index, search by stations
   trips.py    SQLite store + event detection + watcher loop
   push.py     VAPID keypair + Web Push sending
-  app.py      FastAPI: /api/route, /api/trips, /api/vapid, /api/trains
+  app.py      FastAPI: /api/route, /api/stations, /api/search, /api/trips, /api/vapid
 web/          the PWA (no build step, no framework)
 quadlet/      systemd unit for rootless podman
 ```
 
-State lives in the named volume `train-api-data` (`/data`): the VAPID keypair
-and `trips.db`. **The keypair must survive rebuilds** — regenerating it
+State lives in the named volume `train-api-data` (`/data`): the VAPID keypair,
+`trips.db` and `timetable.db`. The last is derived and can be deleted at any
+time; it is rebuilt on the next start. **The keypair must survive rebuilds** — regenerating it
 silently invalidates every browser subscription already issued.
 
 ## The watching list
@@ -337,6 +391,10 @@ Assets are stamped with a content hash so the service worker and the
   Mitigated, not solved: malformed blocks are skipped individually, the last
   good map snapshot keeps serving, and `/api/health` exposes `stale`,
   `consecutive_failures` and the last watch pass.
+- **The timetable is the plan, not the day.** A train cancelled or diverted
+  for engineering works can still appear in a station search; its live
+  itinerary, fetched when it is picked, is the authority. `/api/health`
+  reports when the timetable was built and the last date it covers.
 - **Overnight trains** wrap past midnight; day offsets are inferred from times
   moving backwards, tracked per arrival/departure rather than per station
   (a train can arrive 23:51 and depart 00:02).

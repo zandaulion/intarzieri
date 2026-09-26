@@ -94,13 +94,42 @@
   <!-- step 1 -------------------------------------------------------------->
   <section class="step" id="step-train">
     <h2><span class="stepno">1</span> Ce tren?</h2>
-    <form class="search" id="form-train">
-      <input id="number" inputmode="numeric" autocomplete="off" spellcheck="false"
-             placeholder="Numărul trenului, ex. 1575" aria-label="Numărul trenului" required>
-      <button class="btn" type="submit">Caută</button>
+    <div class="branches modes">
+      <button class="chip on" type="button" data-mode="number">După număr</button>
+      <button class="chip" type="button" data-mode="stations">După stații și dată</button>
+    </div>
+    <div id="mode-number">
+      <form class="search" id="form-train">
+        <input id="number" inputmode="numeric" autocomplete="off" spellcheck="false"
+               placeholder="Numărul trenului, ex. 1575" aria-label="Numărul trenului" required>
+        <button class="btn" type="submit">Caută</button>
+      </form>
+      <p class="hint">Folosește numărul de pe bilet — 1575, 473, 8819.</p>
+    </div>
+    <form class="stations" id="form-stations" autocomplete="off" hidden>
+      <div class="field">
+        <input id="st-from" spellcheck="false" placeholder="De la, ex. București Nord"
+               aria-label="Stația de plecare" role="combobox" aria-autocomplete="list"
+               aria-controls="sg-from" aria-expanded="false">
+        <div class="suggest" id="sg-from" role="listbox" hidden></div>
+      </div>
+      <button class="swap" type="button" id="btn-swap" aria-label="Inversează stațiile"
+              title="Inversează stațiile">⇅</button>
+      <div class="field">
+        <input id="st-to" spellcheck="false" placeholder="Până la, ex. Brașov"
+               aria-label="Stația de sosire" role="combobox" aria-autocomplete="list"
+               aria-controls="sg-to" aria-expanded="false">
+        <div class="suggest" id="sg-to" role="listbox" hidden></div>
+      </div>
+      <div class="when">
+        <input type="date" id="st-date" aria-label="Data călătoriei" required>
+        <button class="btn" type="submit">Caută</button>
+      </div>
+      <p class="hint">Din mersul trenurilor publicat de CFR. Întârzierile apar
+        după ce alegi trenul.</p>
     </form>
-    <p class="hint">Folosește numărul de pe bilet — 1575, 473, 8819.</p>
     <p class="err" id="train-err" hidden></p>
+    <div class="results" id="results" hidden></div>
   </section>
 
   <!-- step 2 -------------------------------------------------------------->
@@ -147,7 +176,8 @@
   <p class="foot">
     Date live de la <a href="https://mersultrenurilor.infofer.ro/">Mersul trenurilor CFR</a>.
     Întârzierile sunt cele raportate de personalul din stații; valorile marcate
-    <em>est.</em> sunt proiecția InfoFer între raportări.
+    <em>est.</em> sunt proiecția InfoFer între raportări. Căutarea după stații
+    folosește mersul trenurilor publicat pe <a href="https://data.gov.ro/organization/sc-informatica-feroviara-sa">data.gov.ro</a>.
   </p>
 </div>
 <script src="/app.js?v=__BUILD_VERSION__"></script>
