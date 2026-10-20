@@ -10,6 +10,76 @@ Caddy serves two separate surfaces: a public one for the app, and a
 tailnet-only one carrying the admin page. Behind it, a rootless podman
 container runs the API.
 
+
+## Start here
+
+This is a self-hosted PWA for Romanian railway journeys. Live train data depends
+on upstream HTML endpoints, so a working local install can still have unavailable
+journeys when the source changes. [Project overview](https://zandaulion.com/intarzieri.html).
+
+### Local installation
+
+Use Python 3.12 or newer, a virtual environment, `openssl`, and Caddy for the local reverse proxy:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+export DATA_DIR="$PWD/.local-data"
+mkdir -p "$DATA_DIR"
+umask 077
+printf 'ADMIN_TOKEN=%s\n' "$(openssl rand -hex 32)" > "$DATA_DIR/admin.env"
+set -a
+. "$DATA_DIR/admin.env"
+set +a
+export PUBLIC_BASE_URL=http://127.0.0.1:8000
+export COOKIE_SECURE=false
+export VAPID_SUBJECT=https://example.com
+mkdir -p "$DATA_DIR"
+python -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8001
+```
+
+The generated admin token stays in the ignored local data directory. Do not
+overwrite that file on an existing installation. In a second terminal in this
+checkout, load the same token:
+
+```bash
+set -a
+. ./.local-data/admin.env
+set +a
+curl --fail http://127.0.0.1:8001/api/health
+curl --fail http://127.0.0.1:8001/api/admin/invites \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"label":"Demo device"}'
+```
+
+Start the local shell/proxy in a third terminal from the repository root:
+
+```bash
+caddy run --config Caddyfile.local.example --adapter caddyfile
+```
+
+Open the returned invitation URL at `http://127.0.0.1:8000`. The proxy serves
+`web/` and forwards the public API to loopback port 8001, while blocking public
+admin paths. Use port 8001 directly with the token only for local administration. `COOKIE_SECURE=false` is only for a local HTTP trial; use HTTPS and the
+secure-cookie default for installation and push notifications.
+
+For production, copy `site.env.example` to ignored `site.env` and fill in your own
+origin and VAPID contact. Provide `ADMIN_TOKEN` privately to the container as well
+as the private proxy; the template does not set it automatically. Create the user
+Quadlet directory before running the deployment script:
+
+```bash
+mkdir -p ~/.config/containers/systemd
+```
+
+The production recipe requires Podman, user systemd, `rsync`, and your configured
+HTTPS reverse proxy. Inspect `quadlet/train-api.container` before installing it;
+keep `/api/admin/*` private. `deploy.sh` publishes into a static web directory and
+restarts services; it does not configure DNS, TLS or a reverse proxy for you.
+Back up the persistent data volume with the API stopped, including the VAPID
+keypair. Never publish the volume, invite links or environment files.
+
 ## Where the data comes from
 
 There is no public CFR API. The old `appiris.infofer.ro` endpoint is dead
@@ -418,3 +488,12 @@ Assets are stamped with a content hash so the service worker and the
 - **iOS** only exposes Web Push to PWAs installed to the Home Screen.
 - Delays are reported by station staff, so they are as accurate — and as
   granular — as those reports.
+
+
+## Support and contributions
+
+Use this repository’s Issues for reproducible bugs and focused feature requests. Include the version, relevant runtime/browser, expected behavior and a minimal synthetic example. Remove credentials, personal records, device identifiers and deployment-specific values before sharing logs or screenshots.
+
+For parser changes, include a minimal sanitized HTML fixture and explain its expected stations, dates and delays. Do not use active trips or invite links as fixtures.
+
+Keep changes focused and update the affected documentation. Security-sensitive reports should follow [SECURITY.md](SECURITY.md).

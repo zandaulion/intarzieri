@@ -1,0 +1,17 @@
+# Local demonstration only. Start from the repository root.
+http://127.0.0.1:8000 {
+    root * web
+    handle /api/admin/* {
+        respond "Not Found" 404
+    }
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8001
+    }
+    handle /i/* {
+        rewrite * /index.html
+        file_server
+    }
+    handle {
+        file_server
+    }
+}

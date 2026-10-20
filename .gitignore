@@ -8,3 +8,6 @@ trips.db.bak-*
 
 # Site-specific values (see site.env.example)
 site.env
+
+# Disposable local trials
+.local-data/
